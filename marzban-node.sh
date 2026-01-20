@@ -58,7 +58,7 @@ DATA_MAIN_DIR="/var/lib/$APP_NAME"
 COMPOSE_FILE="$APP_DIR/docker-compose.yml"
 LAST_XRAY_CORES=5
 CERT_FILE="$DATA_DIR/cert.pem"
-FETCH_REPO="Gozargah/Marzban-scripts"
+FETCH_REPO="npvpn/Marzban-scripts"
 SCRIPT_URL="https://github.com/$FETCH_REPO/raw/master/marzban-node.sh"
 
 colorized_echo() {
@@ -303,7 +303,7 @@ install_marzban_node() {
 services:
   marzban-node:
     container_name: $APP_NAME
-    image: gozargah/marzban-node:latest
+    image: npvpn/node:latest
     restart: always
     network_mode: host
     environment:
