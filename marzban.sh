@@ -123,7 +123,7 @@ detect_compose() {
 }
 
 install_marzban_script() {
-    FETCH_REPO="Gozargah/Marzban-scripts"
+    FETCH_REPO="npvpn/Marzban-scripts"
     SCRIPT_URL="https://github.com/$FETCH_REPO/raw/master/marzban.sh"
     colorized_echo blue "Installing marzban script"
     curl -sSL $SCRIPT_URL | install -m 755 /dev/stdin /usr/local/bin/marzban
@@ -710,7 +710,7 @@ install_marzban() {
     local marzban_version=$1
     local database_type=$2
     # Fetch releases
-    FILES_URL_PREFIX="https://raw.githubusercontent.com/Gozargah/Marzban/master"
+    FILES_URL_PREFIX="https://raw.githubusercontent.com/npvpn/panel/master"
     
     mkdir -p "$DATA_DIR"
     mkdir -p "$APP_DIR"
@@ -723,7 +723,7 @@ install_marzban() {
         cat > "$docker_file_path" <<EOF
 services:
   marzban:
-    image: gozargah/marzban:${marzban_version}
+    image: npvpn/panel:${marzban_version}
     restart: always
     env_file: .env
     network_mode: host
@@ -814,7 +814,7 @@ EOF
         cat > "$docker_file_path" <<EOF
 services:
   marzban:
-    image: gozargah/marzban:${marzban_version}
+    image: npvpn/panel:${marzban_version}
     restart: always
     env_file: .env
     network_mode: host
@@ -910,9 +910,9 @@ EOF
 
         # Install requested version
         if [ "$marzban_version" == "latest" ]; then
-            yq -i '.services.marzban.image = "gozargah/marzban:latest"' "$docker_file_path"
+            yq -i '.services.marzban.image = "npvpn/panel:latest"' "$docker_file_path"
         else
-            yq -i ".services.marzban.image = \"gozargah/marzban:${marzban_version}\"" "$docker_file_path"
+            yq -i ".services.marzban.image = \"npvpn/panel:${marzban_version}\"" "$docker_file_path"
         fi
         echo "Installing $marzban_version version"
         colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
@@ -1072,7 +1072,7 @@ install_command() {
     # Function to check if a version exists in the GitHub releases
     check_version_exists() {
         local version=$1
-        repo_url="https://api.github.com/repos/Gozargah/Marzban/releases"
+        repo_url="https://api.github.com/repos/npvpn/panel/releases"
         if [ "$version" == "latest" ] || [ "$version" == "dev" ]; then
             return 0
         fi
@@ -1472,7 +1472,7 @@ update_command() {
 }
 
 update_marzban_script() {
-    FETCH_REPO="Gozargah/Marzban-scripts"
+    FETCH_REPO="npvpn/Marzban-scripts"
     SCRIPT_URL="https://github.com/$FETCH_REPO/raw/master/marzban.sh"
     colorized_echo blue "Updating marzban script"
     curl -sSL $SCRIPT_URL | install -m 755 /dev/stdin /usr/local/bin/marzban
