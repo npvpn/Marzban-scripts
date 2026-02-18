@@ -934,6 +934,7 @@ EOF
         colorized_echo green "File saved in $APP_DIR/.env"
     fi
     
+    configure_subscription_settings
     colorized_echo blue "Fetching xray config file"
     curl -sL "$FILES_URL_PREFIX/xray_config.json" -o "$DATA_DIR/xray_config.json"
     colorized_echo green "File saved in $DATA_DIR/xray_config.json"
@@ -1002,6 +1003,59 @@ prompt_for_marzban_password() {
 
     # Пауза 3 секунды перед продолжением
     sleep 3
+}
+
+configure_subscription_settings() {
+    colorized_echo blue "Настройка параметров подписки и бота"
+    echo "Подсказка: вводите только username без https://t.me/ (допустимо с @ — уберём)."
+
+    local support_username=""
+    local bot_username=""
+    local support_url="https://t.me/"
+    local bot_url=""
+    local profile_title=""
+
+    printf "Ссылка поддержки — username без https://t.me/ (можно с @): "
+    read support_username
+    support_username=$(echo "$support_username" | xargs)
+    support_username="${support_username#@}"
+    support_username=$(echo "$support_username" | sed -E 's~^https?://t\.me/~~I')
+    if [ -n "$support_username" ]; then
+        support_url="https://t.me/$support_username"
+    fi
+
+    printf "Название подписки в клиенте (по умолчанию: Subscription): "
+    read profile_title
+    if [ -z "$profile_title" ]; then
+        profile_title="Subscription"
+    fi
+    local profile_title_escaped
+    profile_title_escaped=$(printf '%s' "$profile_title" | sed 's/\"/\\"/g')
+
+    printf "Ссылка на бота — username без https://t.me/ (можно с @): "
+    read bot_username
+    bot_username=$(echo "$bot_username" | xargs)
+    bot_username="${bot_username#@}"
+    bot_username=$(echo "$bot_username" | sed -E 's~^https?://t\.me/~~I')
+    if [ -n "$bot_username" ]; then
+        bot_url="https://t.me/$bot_username"
+    else
+        bot_url=""
+    fi
+
+    sed -i '/^SUB_SUPPORT_URL[[:space:]]*=/d' "$ENV_FILE"
+    sed -i '/^SUB_PROFILE_TITLE[[:space:]]*=/d' "$ENV_FILE"
+    sed -i '/^BOT_URL[[:space:]]*=/d' "$ENV_FILE"
+
+    {
+        echo ""
+        echo "# Subscription and bot configuration"
+        echo "SUB_SUPPORT_URL = \"$support_url\""
+        echo "SUB_PROFILE_TITLE = \"$profile_title_escaped\""
+        echo "BOT_URL = \"$bot_url\""
+    } >> "$ENV_FILE"
+
+    colorized_echo green "Параметры подписки и бота сохранены в $ENV_FILE"
 }
 
 install_command() {
