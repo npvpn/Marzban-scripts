@@ -61,3 +61,9 @@ Use `help` to view all commands:
   ```bash
   sudo marzban-node core-update
   ```
+
+- **Migrate existing node to auto-updates via Watchtower**:
+
+  ```bash
+  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ migrate
+  ```
