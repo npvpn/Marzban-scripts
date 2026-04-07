@@ -6,7 +6,7 @@ while [[ $# -gt 0 ]]; do
     key="$1"
     
     case $key in
-        install|update|uninstall|up|down|restart|status|logs|core-update|install-script|uninstall-script|edit)
+        install|update|uninstall|up|down|restart|status|logs|core-update|install-script|uninstall-script|edit|migrate)
             COMMAND="$1"
             shift # past argument
         ;;
@@ -321,9 +321,23 @@ EOL
     
     cat >> "$COMPOSE_FILE" <<EOL
 
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
     volumes:
       - $DATA_MAIN_DIR:/var/lib/marzban
       - $DATA_DIR:/var/lib/marzban-node
+
+  watchtower:
+    image: containrrr/watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "3600"
+      WATCHTOWER_LABEL_ENABLE: "true"
+    command: --label-enable
 EOL
     colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
 }
@@ -992,6 +1006,52 @@ edit_command() {
 }
 
 
+migrate_command() {
+    check_running_as_root
+    if ! is_marzban_node_installed; then
+        colorized_echo red "Marzban-node not installed!"
+        exit 1
+    fi
+
+    detect_compose
+
+    if ! command -v yq &>/dev/null; then
+        echo "yq is not installed. Installing yq..."
+        install_yq
+    fi
+
+    colorized_echo blue "Migrating to auto-update setup..."
+
+    # Change image to npvpn/node:latest
+    yq eval '.services."marzban-node".image = "npvpn/node:latest"' -i "$COMPOSE_FILE"
+
+    # Add watchtower label
+    yq eval '.services."marzban-node".labels = ["com.centurylinklabs.watchtower.enable=true"]' -i "$COMPOSE_FILE"
+
+    # Add watchtower service if not present
+    if ! yq eval '.services.watchtower' "$COMPOSE_FILE" | grep -q "image"; then
+        yq eval '.services.watchtower.image = "containrrr/watchtower"' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.restart = "always"' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.volumes = ["/var/run/docker.sock:/var/run/docker.sock"]' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.environment.WATCHTOWER_CLEANUP = "true"' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.environment.WATCHTOWER_POLL_INTERVAL = "3600"' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.environment.WATCHTOWER_LABEL_ENABLE = "true"' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.command = "--label-enable"' -i "$COMPOSE_FILE"
+    else
+        colorized_echo yellow "Watchtower already configured, skipping."
+    fi
+
+    colorized_echo blue "Pulling latest images..."
+    $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" pull
+
+    colorized_echo blue "Restarting services..."
+    $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" down
+    $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d --remove-orphans
+
+    colorized_echo green "Migration complete! Watchtower will now auto-update the node."
+}
+
+
 usage() {
     colorized_echo blue "================================"
     colorized_echo magenta "       $APP_NAME Node CLI Help"
@@ -1013,6 +1073,7 @@ usage() {
     colorized_echo yellow "  uninstall-script  $(tput sgr0)– Uninstall Marzban-node script"
     colorized_echo yellow "  edit            $(tput sgr0)– Edit docker-compose.yml (via nano or vi)"
     colorized_echo yellow "  core-update     $(tput sgr0)– Update/Change Xray core"
+    colorized_echo yellow "  migrate         $(tput sgr0)– Add Watchtower for auto-updates"
     
     echo
     colorized_echo cyan "Node Information:"
@@ -1077,6 +1138,9 @@ case "$COMMAND" in
     ;;
     edit)
         edit_command
+    ;;
+    migrate)
+        migrate_command
     ;;
     *)
         usage
