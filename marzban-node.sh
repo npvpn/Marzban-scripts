@@ -11,7 +11,7 @@ while [[ $# -gt 0 ]]; do
             shift # past argument
         ;;
         --name)
-            if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" ]]; then
+            if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" || "$COMMAND" == "migrate" ]]; then
                 APP_NAME="$2"
                 shift # past argument
             else
@@ -34,7 +34,7 @@ if [ -z "$NODE_IP" ]; then
     NODE_IP=$(curl -s -6 ifconfig.io)
 fi
 
-if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" ]] && [ -z "$APP_NAME" ]; then
+if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" || "$COMMAND" == "migrate" ]] && [ -z "$APP_NAME" ]; then
     APP_NAME="marzban-node"
 fi
 # Set script name if APP_NAME is not set
@@ -1036,6 +1036,7 @@ migrate_command() {
         yq eval '.services.watchtower.environment.WATCHTOWER_CLEANUP = "true"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.environment.WATCHTOWER_POLL_INTERVAL = "3600"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.environment.WATCHTOWER_LABEL_ENABLE = "true"' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.environment.DOCKER_API_VERSION = "1.53"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.command = "--label-enable"' -i "$COMPOSE_FILE"
     else
         colorized_echo yellow "Watchtower already configured, skipping."
