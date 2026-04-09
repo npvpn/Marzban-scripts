@@ -1036,6 +1036,7 @@ migrate_command() {
         yq eval '.services.watchtower.environment.WATCHTOWER_CLEANUP = "true"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.environment.WATCHTOWER_POLL_INTERVAL = "3600"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.environment.WATCHTOWER_LABEL_ENABLE = "true"' -i "$COMPOSE_FILE"
+        yq eval '.services.watchtower.environment.DOCKER_API_VERSION = "1.53"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.command = "--label-enable"' -i "$COMPOSE_FILE"
     else
         colorized_echo yellow "Watchtower already configured, skipping."
