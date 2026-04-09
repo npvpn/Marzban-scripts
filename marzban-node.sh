@@ -11,7 +11,7 @@ while [[ $# -gt 0 ]]; do
             shift # past argument
         ;;
         --name)
-            if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" ]]; then
+            if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" || "$COMMAND" == "migrate"]]; then
                 APP_NAME="$2"
                 shift # past argument
             else
@@ -34,7 +34,7 @@ if [ -z "$NODE_IP" ]; then
     NODE_IP=$(curl -s -6 ifconfig.io)
 fi
 
-if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" ]] && [ -z "$APP_NAME" ]; then
+if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" || "$COMMAND" == "migrate" ]] && [ -z "$APP_NAME" ]; then
     APP_NAME="marzban-node"
 fi
 # Set script name if APP_NAME is not set
