@@ -11,7 +11,7 @@ while [[ $# -gt 0 ]]; do
             shift # past argument
         ;;
         --name)
-            if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" || "$COMMAND" == "migrate"]]; then
+            if [[ "$COMMAND" == "install" || "$COMMAND" == "install-script" || "$COMMAND" == "migrate" ]]; then
                 APP_NAME="$2"
                 shift # past argument
             else
