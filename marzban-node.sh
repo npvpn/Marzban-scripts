@@ -337,6 +337,7 @@ EOL
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_POLL_INTERVAL: "3600"
       WATCHTOWER_LABEL_ENABLE: "true"
+      DOCKER_API_VERSION: "1.53"
     command: --label-enable
 EOL
     colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
@@ -1028,19 +1029,19 @@ migrate_command() {
     # Add watchtower label
     yq eval '.services."marzban-node".labels = ["com.centurylinklabs.watchtower.enable=true"]' -i "$COMPOSE_FILE"
 
-    # Add watchtower service if not present
+    # Ensure watchtower service is present and env is up to date (idempotent)
     if ! yq eval '.services.watchtower' "$COMPOSE_FILE" | grep -q "image"; then
         yq eval '.services.watchtower.image = "containrrr/watchtower"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.restart = "always"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.volumes = ["/var/run/docker.sock:/var/run/docker.sock"]' -i "$COMPOSE_FILE"
-        yq eval '.services.watchtower.environment.WATCHTOWER_CLEANUP = "true"' -i "$COMPOSE_FILE"
-        yq eval '.services.watchtower.environment.WATCHTOWER_POLL_INTERVAL = "3600"' -i "$COMPOSE_FILE"
-        yq eval '.services.watchtower.environment.WATCHTOWER_LABEL_ENABLE = "true"' -i "$COMPOSE_FILE"
-        yq eval '.services.watchtower.environment.DOCKER_API_VERSION = "1.53"' -i "$COMPOSE_FILE"
         yq eval '.services.watchtower.command = "--label-enable"' -i "$COMPOSE_FILE"
     else
-        colorized_echo yellow "Watchtower already configured, skipping."
+        colorized_echo yellow "Watchtower already present, updating environment."
     fi
+    yq eval '.services.watchtower.environment.WATCHTOWER_CLEANUP = "true"' -i "$COMPOSE_FILE"
+    yq eval '.services.watchtower.environment.WATCHTOWER_POLL_INTERVAL = "3600"' -i "$COMPOSE_FILE"
+    yq eval '.services.watchtower.environment.WATCHTOWER_LABEL_ENABLE = "true"' -i "$COMPOSE_FILE"
+    yq eval '.services.watchtower.environment.DOCKER_API_VERSION = "1.53"' -i "$COMPOSE_FILE"
 
     colorized_echo blue "Pulling latest images..."
     $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" pull
