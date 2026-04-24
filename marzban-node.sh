@@ -337,7 +337,7 @@ EOL
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_POLL_INTERVAL: "3600"
       WATCHTOWER_LABEL_ENABLE: "true"
-      DOCKER_API_VERSION: "1.53"
+      DOCKER_API_VERSION: "1.52"
     command: --label-enable
 EOL
     colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
@@ -1041,7 +1041,7 @@ migrate_command() {
     yq eval '.services.watchtower.environment.WATCHTOWER_CLEANUP = "true"' -i "$COMPOSE_FILE"
     yq eval '.services.watchtower.environment.WATCHTOWER_POLL_INTERVAL = "3600"' -i "$COMPOSE_FILE"
     yq eval '.services.watchtower.environment.WATCHTOWER_LABEL_ENABLE = "true"' -i "$COMPOSE_FILE"
-    yq eval '.services.watchtower.environment.DOCKER_API_VERSION = "1.53"' -i "$COMPOSE_FILE"
+    yq eval '.services.watchtower.environment.DOCKER_API_VERSION = "1.52"' -i "$COMPOSE_FILE"
 
     colorized_echo blue "Pulling latest images..."
     $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" pull
