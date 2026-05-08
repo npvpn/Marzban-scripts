@@ -303,7 +303,7 @@ install_marzban_node() {
 services:
   marzban-node:
     container_name: $APP_NAME
-    image: npvpn/node:latest
+    image: npvpn/node:stable
     restart: always
     network_mode: host
     environment:
@@ -1023,8 +1023,8 @@ migrate_command() {
 
     colorized_echo blue "Migrating to auto-update setup..."
 
-    # Change image to npvpn/node:latest
-    yq eval '.services."marzban-node".image = "npvpn/node:latest"' -i "$COMPOSE_FILE"
+    # Change image to npvpn/node:stable (production channel; :latest is reserved for tests)
+    yq eval '.services."marzban-node".image = "npvpn/node:stable"' -i "$COMPOSE_FILE"
 
     # Add watchtower label
     yq eval '.services."marzban-node".labels = ["com.centurylinklabs.watchtower.enable=true"]' -i "$COMPOSE_FILE"
