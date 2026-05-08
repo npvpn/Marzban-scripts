@@ -826,7 +826,7 @@ services:
         condition: service_healthy
 
   mysql:
-    image: mysql:8.0.36
+    image: mysql:9.6.0
     env_file: .env
     network_mode: host
     restart: always
