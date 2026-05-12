@@ -297,7 +297,11 @@ install_marzban_node() {
     done
     
     colorized_echo blue "Generating compose file"
-    
+
+    # Detect host Docker daemon API version so watchtower client matches it.
+    # Hardcoding DOCKER_API_VERSION breaks on hosts whose daemon supports a lower max API.
+    HOST_DOCKER_API_VERSION=$(docker version --format '{{.Server.APIVersion}}' 2>/dev/null || true)
+
     # Write content to the file
     cat > "$COMPOSE_FILE" <<EOL
 services:
@@ -337,9 +341,19 @@ EOL
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_POLL_INTERVAL: "3600"
       WATCHTOWER_LABEL_ENABLE: "true"
-      DOCKER_API_VERSION: "1.52"
     command: --label-enable
 EOL
+
+    if [[ -n "$HOST_DOCKER_API_VERSION" ]]; then
+        if ! command -v yq >/dev/null 2>&1; then
+            install_yq
+        fi
+        yq eval ".services.watchtower.environment.DOCKER_API_VERSION = \"$HOST_DOCKER_API_VERSION\"" -i "$COMPOSE_FILE"
+        colorized_echo green "Pinned watchtower DOCKER_API_VERSION to host value: $HOST_DOCKER_API_VERSION"
+    else
+        colorized_echo yellow "Could not detect host Docker API version; leaving watchtower to negotiate."
+    fi
+
     colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
 }
 
@@ -1041,7 +1055,17 @@ migrate_command() {
     yq eval '.services.watchtower.environment.WATCHTOWER_CLEANUP = "true"' -i "$COMPOSE_FILE"
     yq eval '.services.watchtower.environment.WATCHTOWER_POLL_INTERVAL = "3600"' -i "$COMPOSE_FILE"
     yq eval '.services.watchtower.environment.WATCHTOWER_LABEL_ENABLE = "true"' -i "$COMPOSE_FILE"
-    yq eval '.services.watchtower.environment.DOCKER_API_VERSION = "1.52"' -i "$COMPOSE_FILE"
+
+    # Pin DOCKER_API_VERSION to the host daemon's max, or drop the override entirely if we can't detect it.
+    # A hardcoded value breaks watchtower on hosts whose daemon supports a lower API max.
+    HOST_DOCKER_API_VERSION=$(docker version --format '{{.Server.APIVersion}}' 2>/dev/null || true)
+    if [[ -n "$HOST_DOCKER_API_VERSION" ]]; then
+        yq eval ".services.watchtower.environment.DOCKER_API_VERSION = \"$HOST_DOCKER_API_VERSION\"" -i "$COMPOSE_FILE"
+        colorized_echo green "Pinned watchtower DOCKER_API_VERSION to host value: $HOST_DOCKER_API_VERSION"
+    else
+        yq eval 'del(.services.watchtower.environment.DOCKER_API_VERSION)' -i "$COMPOSE_FILE"
+        colorized_echo yellow "Could not detect host Docker API version; leaving watchtower to negotiate."
+    fi
 
     colorized_echo blue "Pulling latest images..."
     $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" pull
