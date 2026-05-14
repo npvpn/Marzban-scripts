@@ -6,7 +6,7 @@ while [[ $# -gt 0 ]]; do
     key="$1"
     
     case $key in
-        install|update|uninstall|up|down|restart|status|logs|core-update|install-script|uninstall-script|edit|migrate)
+        install|update|uninstall|up|down|restart|status|logs|core-update|install-script|uninstall-script|edit|migrate|tune-conntrack)
             COMMAND="$1"
             shift # past argument
         ;;
@@ -219,6 +219,27 @@ is_port_occupied() {
     else
         return 1
     fi
+}
+
+# Raise nf_conntrack limits so VPN traffic doesn't hit the default 64k table
+# and start dropping packets under load.
+tune_conntrack_limits() {
+    colorized_echo blue "Tuning nf_conntrack limits for VPN traffic..."
+
+    # sysctl --system fails on net.netfilter.* keys if the module isn't loaded yet.
+    modprobe nf_conntrack 2>/dev/null || true
+    echo nf_conntrack > /etc/modules-load.d/nf_conntrack.conf
+
+    cat > /etc/sysctl.d/99-vpn.conf <<'EOF'
+net.netfilter.nf_conntrack_max = 262144
+net.netfilter.nf_conntrack_buckets = 65536
+net.netfilter.nf_conntrack_tcp_timeout_established = 7200
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+net.netfilter.nf_conntrack_tcp_timeout_close_wait = 30
+EOF
+
+    sysctl --system >/dev/null
+    colorized_echo green "nf_conntrack limits applied (/etc/sysctl.d/99-vpn.conf)."
 }
 
 install_marzban_node() {
@@ -458,6 +479,7 @@ install_command() {
     detect_compose
     install_marzban_node_script
     install_marzban_node
+    tune_conntrack_limits
     up_marzban_node
     follow_marzban_node_logs
     echo "Use your IP: $NODE_IP and defaults ports: $SERVICE_PORT and $XRAY_API_PORT to setup your Marzban Main Panel"
@@ -1037,6 +1059,8 @@ migrate_command() {
 
     colorized_echo blue "Migrating to auto-update setup..."
 
+    tune_conntrack_limits
+
     # Change image to npvpn/node:stable (production channel; :latest is reserved for tests)
     yq eval '.services."marzban-node".image = "npvpn/node:stable"' -i "$COMPOSE_FILE"
 
@@ -1100,6 +1124,7 @@ usage() {
     colorized_echo yellow "  edit            $(tput sgr0)– Edit docker-compose.yml (via nano or vi)"
     colorized_echo yellow "  core-update     $(tput sgr0)– Update/Change Xray core"
     colorized_echo yellow "  migrate         $(tput sgr0)– Add Watchtower for auto-updates"
+    colorized_echo yellow "  tune-conntrack  $(tput sgr0)– Raise nf_conntrack limits for VPN traffic"
     
     echo
     colorized_echo cyan "Node Information:"
@@ -1167,6 +1192,10 @@ case "$COMMAND" in
     ;;
     migrate)
         migrate_command
+    ;;
+    tune-conntrack)
+        check_running_as_root
+        tune_conntrack_limits
     ;;
     *)
         usage
