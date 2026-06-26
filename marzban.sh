@@ -1360,10 +1360,15 @@ create_panel_admin() {
     local output
 
     colorized_echo blue "Creating panel admin: ${username}"
-    output=$(MARZBAN_ADMIN_PASSWORD="$password_hash" marzban_cli admin create \
+    # -T: no TTY (avoid hanging on hidden prompts). -e: pass hash into the container
+    # (host MARZBAN_ADMIN_PASSWORD is not forwarded by docker compose exec by default).
+    output=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" exec -T \
+        -e CLI_PROG_NAME="marzban cli" \
+        -e "MARZBAN_ADMIN_PASSWORD=${password_hash}" \
+        marzban marzban-cli admin create \
         -u "$username" \
         --sudo \
-        --telegram-id "" \
+        --telegram-id 0 \
         --discord-webhook "" 2>&1) || {
         if echo "$output" | grep -qi "already exists"; then
             colorized_echo yellow "Admin \"${username}\" already exists, skipping creation."
