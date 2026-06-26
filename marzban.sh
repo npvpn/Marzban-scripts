@@ -1266,6 +1266,7 @@ configure_partner_firewall() {
     ufw allow 22/tcp
     ufw allow 80/tcp
     ufw allow 443/tcp
+    ufw allow 8443/tcp
     ufw allow "${panel_port}/tcp"
 
     if ufw status 2>/dev/null | grep -q "Status: active"; then
@@ -1275,7 +1276,7 @@ configure_partner_firewall() {
         colorized_echo green "UFW enabled."
     fi
 
-    colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, ${panel_port}/tcp"
+    colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, 8443/tcp, ${panel_port}/tcp"
 }
 
 issue_ssl_certificate() {
