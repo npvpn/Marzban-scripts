@@ -11,6 +11,23 @@ COMPOSE_FILE="$APP_DIR/docker-compose.yml"
 ENV_FILE="$APP_DIR/.env"
 LAST_XRAY_CORES=10
 
+# Partner install context (set by install-partner)
+PARTNER_MODE="false"
+PARTNER_DOMAIN=""
+PARTNER_UVICORN_PORT="8001"
+PARTNER_CERT_EMAIL=""
+PARTNER_MYSQL_PASSWORD=""
+PARTNER_ADMIN_USERNAME=""
+PARTNER_ADMIN_PASSWORD_HASH=""
+PARTNER_SUBSCRIPTION_TITLE=""
+PARTNER_SUPPORT_TELEGRAM=""
+PARTNER_BOT_TELEGRAM=""
+PARTNER_SKIP_DNS_CHECK="false"
+PARTNER_SKIP_CERT="false"
+PARTNER_SKIP_FIREWALL="false"
+PARTNER_NON_INTERACTIVE="false"
+PARTNER_NO_LOGS="false"
+
 colorized_echo() {
     local color=$1
     local text=$2
@@ -706,11 +723,53 @@ update_core_command() {
     colorized_echo blue "Installation of Xray-core version $selected_version completed."
 }
 
+get_mysql_bind_address() {
+    if [ "$PARTNER_MODE" = "true" ]; then
+        echo "0.0.0.0"
+    else
+        echo "127.0.0.1"
+    fi
+}
+
+get_marzban_ssl_volume_lines() {
+    if [ "$PARTNER_MODE" = "true" ] && [ -n "$PARTNER_DOMAIN" ]; then
+        cat <<EOF
+      - /etc/letsencrypt/live/${PARTNER_DOMAIN}/fullchain.pem:/etc/letsencrypt/live/${PARTNER_DOMAIN}/fullchain.pem:ro
+      - /etc/letsencrypt/live/${PARTNER_DOMAIN}/privkey.pem:/etc/letsencrypt/live/${PARTNER_DOMAIN}/privkey.pem:ro
+EOF
+    fi
+}
+
+configure_partner_ssl_env() {
+    local domain=$1
+    local port=$2
+    local cert_dir="/etc/letsencrypt/live/${domain}"
+
+    sed -i '/^UVICORN_PORT[[:space:]]*=/d' "$ENV_FILE"
+    sed -i '/^UVICORN_SSL_CERTFILE[[:space:]]*=/d' "$ENV_FILE"
+    sed -i '/^UVICORN_SSL_KEYFILE[[:space:]]*=/d' "$ENV_FILE"
+    sed -i '/^# Partner SSL configuration/d' "$ENV_FILE"
+
+    {
+        echo ""
+        echo "# Partner SSL configuration"
+        echo "UVICORN_PORT = ${port}"
+        echo "UVICORN_SSL_CERTFILE = \"${cert_dir}/fullchain.pem\""
+        echo "UVICORN_SSL_KEYFILE = \"${cert_dir}/privkey.pem\""
+    } >> "$ENV_FILE"
+
+    colorized_echo green "Partner SSL settings saved in $ENV_FILE"
+}
+
 install_marzban() {
     local marzban_version=$1
     local database_type=$2
     # Fetch releases
     FILES_URL_PREFIX="https://raw.githubusercontent.com/npvpn/panel/master"
+    local mysql_bind_address
+    local marzban_ssl_volumes
+    mysql_bind_address=$(get_mysql_bind_address)
+    marzban_ssl_volumes=$(get_marzban_ssl_volume_lines)
     
     mkdir -p "$DATA_DIR"
     mkdir -p "$APP_DIR"
@@ -730,6 +789,7 @@ services:
     volumes:
       - /var/lib/marzban:/var/lib/marzban
       - /var/lib/marzban/logs:/var/lib/marzban-node
+${marzban_ssl_volumes}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -746,7 +806,7 @@ services:
       MYSQL_USER: \${MYSQL_USER}
       MYSQL_PASSWORD: \${MYSQL_PASSWORD}
     command:
-      - --bind-address=127.0.0.1                  # Restricts access to localhost for increased security
+      - --bind-address=${mysql_bind_address}
       - --character_set_server=utf8mb4            # Sets UTF-8 character set for full Unicode support
       - --collation_server=utf8mb4_unicode_ci     # Defines collation for Unicode
       - --host-cache-size=0                       # Disables host cache to prevent DNS issues
@@ -809,6 +869,10 @@ EOF
         
         colorized_echo green "File saved in $APP_DIR/.env"
 
+        if [ "$PARTNER_MODE" = "true" ]; then
+            configure_partner_ssl_env "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
+        fi
+
     elif [ "$database_type" == "mysql" ]; then
         # Generate docker-compose.yml with MySQL content
         cat > "$docker_file_path" <<EOF
@@ -821,6 +885,7 @@ services:
     volumes:
       - /var/lib/marzban:/var/lib/marzban
       - /var/lib/marzban/logs:/var/lib/marzban-node
+${marzban_ssl_volumes}
     depends_on:
       mysql:
         condition: service_healthy
@@ -838,7 +903,7 @@ services:
       MYSQL_PASSWORD: \${MYSQL_PASSWORD}
     command:
       - --mysqlx=OFF                             # Disables MySQL X Plugin to save resources if X Protocol isn't used
-      - --bind-address=127.0.0.1                  # Restricts access to localhost for increased security
+      - --bind-address=${mysql_bind_address}
       - --character_set_server=utf8mb4            # Sets UTF-8 character set for full Unicode support
       - --collation_server=utf8mb4_unicode_ci     # Defines collation for Unicode
       - --log-bin=mysql-bin                       # Enables binary logging for point-in-time recovery
@@ -846,8 +911,7 @@ services:
       - --host-cache-size=0                       # Disables host cache to prevent DNS issues
       - --innodb-open-files=1024                  # Sets the limit for InnoDB open files
       - --innodb-buffer-pool-size=256M            # Allocates buffer pool size for InnoDB
-      - --innodb-log-file-size=64M                # Sets InnoDB log file size to balance log retention and performance
-      - --innodb-log-files-in-group=2             # Uses two log files to balance recovery and disk I/O
+      - --innodb-redo-log-capacity=128M           # Redo log capacity (replaces innodb_log_file_size + innodb_log_files_in_group since MySQL 8.0.30)
       - --general_log=0                           # Disables general query log for lower disk usage
       - --slow_query_log=1                        # Enables slow query log for performance analysis
       - --slow_query_log_file=/var/lib/mysql/slow.log # Logs slow queries for troubleshooting
@@ -900,6 +964,10 @@ EOF
         echo "SQLALCHEMY_DATABASE_URL=\"$SQLALCHEMY_DATABASE_URL\"" >> "$ENV_FILE"
         
         colorized_echo green "File saved in $APP_DIR/.env"
+
+        if [ "$PARTNER_MODE" = "true" ]; then
+            configure_partner_ssl_env "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
+        fi
 
     else
         echo "----------------------------"
@@ -988,55 +1056,92 @@ status_command() {
 
 
 prompt_for_marzban_password() {
+    if [ -n "$MYSQL_PASSWORD" ]; then
+        colorized_echo green "Using provided MySQL password for marzban user."
+        return
+    fi
+
     colorized_echo cyan "This password will be used to access the database and should be strong."
     colorized_echo cyan "If you do not enter a custom password, a secure 20-character password will be generated automatically."
 
-    # Запрашиваем ввод пароля
     read -p "Enter the password for the marzban user (or press Enter to generate a secure default password): " MYSQL_PASSWORD
 
-    # Генерация 20-значного пароля, если пользователь оставил поле пустым
     if [ -z "$MYSQL_PASSWORD" ]; then
         MYSQL_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
         colorized_echo green "A secure password has been generated automatically."
     fi
     colorized_echo green "This password will be recorded in the .env file for future use."
 
-    # Пауза 3 секунды перед продолжением
     sleep 3
+}
+
+normalize_telegram_username() {
+    local value="$1"
+    value=$(echo "$value" | xargs)
+    value="${value#@}"
+    value=$(echo "$value" | sed -E 's~^https?://t\.me/~~I')
+    echo "$value"
+}
+
+normalize_domain() {
+    local value="$1"
+    value=$(echo "$value" | xargs)
+    value=$(echo "$value" | sed -E 's~^https?://~~I')
+    value="${value%%/*}"
+    value="${value%%:*}"
+    echo "$value"
 }
 
 configure_subscription_settings() {
     colorized_echo blue "Настройка параметров подписки и бота"
-    echo "Подсказка: вводите только username без https://t.me/ (допустимо с @ — уберём)."
 
     local support_username=""
     local bot_username=""
     local support_url="https://t.me/"
     local bot_url=""
     local profile_title=""
+    local profile_title_escaped
 
-    printf "Ссылка поддержки — username без https://t.me/ (можно с @): "
-    read support_username
-    support_username=$(echo "$support_username" | xargs)
-    support_username="${support_username#@}"
-    support_username=$(echo "$support_username" | sed -E 's~^https?://t\.me/~~I')
+    if [ -n "$PARTNER_SUPPORT_TELEGRAM" ]; then
+        support_username=$(normalize_telegram_username "$PARTNER_SUPPORT_TELEGRAM")
+    elif [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+        colorized_echo red "Support telegram username is required in non-interactive mode."
+        exit 1
+    else
+        echo "Подсказка: вводите только username без https://t.me/ (допустимо с @ — уберём)."
+        printf "Ссылка поддержки — username без https://t.me/ (можно с @): "
+        read support_username
+        support_username=$(normalize_telegram_username "$support_username")
+    fi
+
+    if [ -n "$PARTNER_SUBSCRIPTION_TITLE" ]; then
+        profile_title="$PARTNER_SUBSCRIPTION_TITLE"
+    elif [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+        colorized_echo red "Subscription title is required in non-interactive mode."
+        exit 1
+    else
+        printf "Название подписки в клиенте (по умолчанию: Subscription): "
+        read profile_title
+        if [ -z "$profile_title" ]; then
+            profile_title="Subscription"
+        fi
+    fi
+    profile_title_escaped=$(printf '%s' "$profile_title" | sed 's/\"/\\"/g')
+
+    if [ -n "$PARTNER_BOT_TELEGRAM" ]; then
+        bot_username=$(normalize_telegram_username "$PARTNER_BOT_TELEGRAM")
+    elif [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+        colorized_echo red "Bot telegram username is required in non-interactive mode."
+        exit 1
+    else
+        printf "Ссылка на бота — username без https://t.me/ (можно с @): "
+        read bot_username
+        bot_username=$(normalize_telegram_username "$bot_username")
+    fi
+
     if [ -n "$support_username" ]; then
         support_url="https://t.me/$support_username"
     fi
-
-    printf "Название подписки в клиенте (по умолчанию: Subscription): "
-    read profile_title
-    if [ -z "$profile_title" ]; then
-        profile_title="Subscription"
-    fi
-    local profile_title_escaped
-    profile_title_escaped=$(printf '%s' "$profile_title" | sed 's/\"/\\"/g')
-
-    printf "Ссылка на бота — username без https://t.me/ (можно с @): "
-    read bot_username
-    bot_username=$(echo "$bot_username" | xargs)
-    bot_username="${bot_username#@}"
-    bot_username=$(echo "$bot_username" | sed -E 's~^https?://t\.me/~~I')
     if [ -n "$bot_username" ]; then
         bot_url="https://t.me/$bot_username"
     else
@@ -1046,6 +1151,7 @@ configure_subscription_settings() {
     sed -i '/^SUB_SUPPORT_URL[[:space:]]*=/d' "$ENV_FILE"
     sed -i '/^SUB_PROFILE_TITLE[[:space:]]*=/d' "$ENV_FILE"
     sed -i '/^BOT_URL[[:space:]]*=/d' "$ENV_FILE"
+    sed -i '/^# Subscription and bot configuration/d' "$ENV_FILE"
 
     {
         echo ""
@@ -1056,6 +1162,540 @@ configure_subscription_settings() {
     } >> "$ENV_FILE"
 
     colorized_echo green "Параметры подписки и бота сохранены в $ENV_FILE"
+}
+
+get_server_public_ip() {
+    local ip=""
+    ip=$(curl -4 -fsS --max-time 10 ifconfig.me 2>/dev/null || true)
+    if [ -z "$ip" ]; then
+        ip=$(curl -4 -fsS --max-time 10 api.ipify.org 2>/dev/null || true)
+    fi
+    if [ -z "$ip" ]; then
+        ip=$(curl -4 -fsS --max-time 10 icanhazip.com 2>/dev/null || true)
+    fi
+    echo "$ip"
+}
+
+check_domain_dns() {
+    local domain=$1
+    local server_ip
+    local domain_ips
+    local resolved_ip
+
+    if [ "$PARTNER_SKIP_DNS_CHECK" = "true" ]; then
+        colorized_echo yellow "Skipping DNS check."
+        return 0
+    fi
+
+    if ! command -v dig >/dev/null 2>&1; then
+        install_package dnsutils
+    fi
+
+    server_ip=$(get_server_public_ip)
+    if [ -z "$server_ip" ]; then
+        colorized_echo yellow "Could not detect server public IP. Skipping DNS verification."
+        return 0
+    fi
+
+    domain_ips=$(dig +short A "$domain" 2>/dev/null | grep -E '^[0-9.]+$' || true)
+    if [ -z "$domain_ips" ]; then
+        domain_ips=$(dig +short AAAA "$domain" 2>/dev/null | grep -E ':' || true)
+    fi
+
+    if [ -z "$domain_ips" ]; then
+        colorized_echo red "DNS records not found for domain: $domain"
+        if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+            exit 1
+        fi
+        read -p "Continue anyway? (y/n) " reply
+        if [[ ! $reply =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+        return 0
+    fi
+
+    for resolved_ip in $domain_ips; do
+        if [ "$resolved_ip" = "$server_ip" ]; then
+            colorized_echo green "DNS check passed: $domain -> $server_ip"
+            return 0
+        fi
+    done
+
+    colorized_echo yellow "DNS mismatch: $domain resolves to [$domain_ips], server IP is $server_ip"
+    if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+        colorized_echo red "Aborting due to DNS mismatch in non-interactive mode."
+        exit 1
+    fi
+    read -p "Continue anyway? (y/n) " reply
+    if [[ ! $reply =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+}
+
+is_port_free() {
+    local port=$1
+    if command -v ss >/dev/null 2>&1; then
+        ! ss -ltn "( sport = :$port )" 2>/dev/null | grep -q ":$port"
+        return $?
+    fi
+    if command -v netstat >/dev/null 2>&1; then
+        ! netstat -ltn 2>/dev/null | awk '{print $4}' | grep -q ":$port$"
+        return $?
+    fi
+    return 0
+}
+
+configure_partner_firewall() {
+    local panel_port="${PARTNER_UVICORN_PORT:-8001}"
+
+    if [ "$PARTNER_SKIP_FIREWALL" = "true" ]; then
+        colorized_echo yellow "Skipping firewall configuration."
+        return 0
+    fi
+
+    if [[ "$OS" != "Ubuntu"* ]] && [[ "$OS" != "Debian"* ]]; then
+        colorized_echo yellow "UFW firewall setup is currently supported only on Debian/Ubuntu."
+        return 0
+    fi
+
+    if ! command -v ufw >/dev/null 2>&1; then
+        install_package ufw
+    fi
+
+    colorized_echo blue "Configuring UFW firewall"
+    ufw allow 22/tcp
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    ufw allow 8443/tcp
+    ufw allow "${panel_port}/tcp"
+
+    if ufw status 2>/dev/null | grep -q "Status: active"; then
+        colorized_echo green "UFW is already enabled."
+    else
+        ufw --force enable
+        colorized_echo green "UFW enabled."
+    fi
+
+    colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, 8443/tcp, ${panel_port}/tcp"
+}
+
+issue_ssl_certificate() {
+    local domain=$1
+    local email=$2
+    local cert_dir="/etc/letsencrypt/live/${domain}"
+
+    if [ "$PARTNER_SKIP_CERT" = "true" ]; then
+        colorized_echo yellow "Skipping certificate issuance."
+        if [ ! -f "${cert_dir}/fullchain.pem" ] || [ ! -f "${cert_dir}/privkey.pem" ]; then
+            colorized_echo red "Certificate files not found at ${cert_dir}"
+            exit 1
+        fi
+        return 0
+    fi
+
+    if [ -f "${cert_dir}/fullchain.pem" ] && [ -f "${cert_dir}/privkey.pem" ]; then
+        colorized_echo green "Certificate already exists for ${domain}, skipping issuance."
+        return 0
+    fi
+
+    if [[ "$OS" != "Ubuntu"* ]] && [[ "$OS" != "Debian"* ]]; then
+        colorized_echo red "Partner install certificate issuance is currently supported only on Debian/Ubuntu."
+        exit 1
+    fi
+
+    if ! command -v certbot >/dev/null 2>&1; then
+        install_package certbot
+    fi
+
+    if ! is_port_free 80; then
+        colorized_echo red "Port 80 is in use. Stop the conflicting service before issuing certificates."
+        exit 1
+    fi
+
+    colorized_echo blue "Issuing SSL certificate for ${domain}"
+    certbot certonly \
+        --standalone \
+        --email "$email" \
+        --agree-tos \
+        --non-interactive \
+        --preferred-challenges http-01 \
+        --cert-name "$domain" \
+        -d "$domain"
+
+    if [ ! -f "${cert_dir}/fullchain.pem" ] || [ ! -f "${cert_dir}/privkey.pem" ]; then
+        colorized_echo red "Certificate issuance failed for ${domain}"
+        exit 1
+    fi
+
+    colorized_echo green "Certificate issued successfully:"
+    colorized_echo cyan "  ${cert_dir}/fullchain.pem"
+    colorized_echo cyan "  ${cert_dir}/privkey.pem"
+}
+
+wait_for_marzban_ready() {
+    local port=$1
+    local attempts=60
+    local i=0
+    local http_code
+
+    colorized_echo blue "Waiting for Marzban to become ready on port ${port}..."
+    while [ $i -lt $attempts ]; do
+        if is_marzban_up; then
+            http_code=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${port}/" 2>/dev/null || echo "000")
+            if [[ "$http_code" =~ ^[23] ]]; then
+                colorized_echo green "Marzban is ready (HTTP ${http_code})."
+                return 0
+            fi
+        fi
+        sleep 3
+        i=$((i + 1))
+    done
+
+    colorized_echo red "Marzban did not become ready within the expected time."
+    exit 1
+}
+
+create_panel_admin() {
+    local username=$1
+    local password_hash=$2
+    local output
+
+    colorized_echo blue "Creating panel admin: ${username}"
+    # -T: no TTY (avoid hanging on hidden prompts). -e: pass hash into the container
+    # (host MARZBAN_ADMIN_PASSWORD is not forwarded by docker compose exec by default).
+    output=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" exec -T \
+        -e CLI_PROG_NAME="marzban cli" \
+        -e "MARZBAN_ADMIN_PASSWORD=${password_hash}" \
+        marzban marzban-cli admin create \
+        -u "$username" \
+        --sudo \
+        --telegram-id 0 \
+        --discord-webhook "" 2>&1) || {
+        if echo "$output" | grep -qi "already exists"; then
+            colorized_echo yellow "Admin \"${username}\" already exists, skipping creation."
+            return 0
+        fi
+        colorized_echo red "Failed to create panel admin:"
+        echo "$output"
+        exit 1
+    }
+
+    colorized_echo green "Panel admin \"${username}\" created successfully."
+}
+
+verify_partner_install() {
+    local domain=$1
+    local port=$2
+    local http_code
+    local dashboard_url="https://${domain}:${port}/dashboard/"
+
+    http_code=$(curl -k -s -o /dev/null -w "%{http_code}" "https://${domain}:${port}/" 2>/dev/null || echo "000")
+    if [[ "$http_code" =~ ^[23] ]]; then
+        colorized_echo green "Panel is reachable (HTTP ${http_code})."
+        colorized_echo cyan "Dashboard URL: ${dashboard_url}"
+        return 0
+    fi
+
+    colorized_echo yellow "Could not verify panel via HTTPS (HTTP ${http_code}). Check firewall and DNS."
+    colorized_echo cyan "Expected dashboard URL: ${dashboard_url}"
+}
+
+print_post_install_checklist() {
+    local domain=$1
+    local port=$2
+
+    colorized_echo blue "====================================="
+    colorized_echo blue "      Partner install complete"
+    colorized_echo blue "====================================="
+    colorized_echo green "Panel URL: https://${domain}:${port}/dashboard/"
+    colorized_echo green "Panel admin: ${PARTNER_ADMIN_USERNAME}"
+    colorized_echo cyan "MySQL password is stored in ${ENV_FILE}"
+    echo
+    colorized_echo yellow "Next steps in the bot admin panel:"
+    echo "  1. Bots -> add bot (domain = ${domain}, link admin ${PARTNER_ADMIN_USERNAME})"
+    echo "  2. Use the Test button to verify Marzban connection"
+    echo "  3. Bot settings -> configure required modules"
+    echo "  4. Configure per-bot payment providers (e.g. YooKassa)"
+    echo "  5. Log out and sign in as the partner admin (plain password, not hash)"
+    echo
+    colorized_echo cyan "Certificate renewal: certbot renew (systemd timer is usually installed with certbot)"
+    colorized_echo blue "====================================="
+}
+
+require_partner_params() {
+    local missing=()
+
+    [ -z "$PARTNER_DOMAIN" ] && missing+=("--domain")
+    [ -z "$PARTNER_CERT_EMAIL" ] && missing+=("--cert-email")
+    [ -z "$PARTNER_MYSQL_PASSWORD" ] && missing+=("--mysql-password")
+    [ -z "$PARTNER_ADMIN_USERNAME" ] && missing+=("--admin-username")
+    [ -z "$PARTNER_ADMIN_PASSWORD_HASH" ] && missing+=("--admin-password-hash")
+    [ -z "$PARTNER_SUBSCRIPTION_TITLE" ] && missing+=("--subscription-title")
+    [ -z "$PARTNER_SUPPORT_TELEGRAM" ] && missing+=("--support-telegram")
+    [ -z "$PARTNER_BOT_TELEGRAM" ] && missing+=("--bot-telegram")
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        colorized_echo red "Missing required options for non-interactive install: ${missing[*]}"
+        exit 1
+    fi
+}
+
+prompt_partner_install_params() {
+    if [ -z "$PARTNER_DOMAIN" ]; then
+        read -p "Domain for the partner panel (e.g. z2vpn.npvpn.net): " PARTNER_DOMAIN
+    fi
+    PARTNER_DOMAIN=$(normalize_domain "$PARTNER_DOMAIN")
+    if [ -z "$PARTNER_DOMAIN" ]; then
+        colorized_echo red "Domain cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$PARTNER_CERT_EMAIL" ]; then
+        read -p "Email for Let's Encrypt certificates: " PARTNER_CERT_EMAIL
+    fi
+    if [ -z "$PARTNER_CERT_EMAIL" ]; then
+        colorized_echo red "Certificate email cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$PARTNER_MYSQL_PASSWORD" ]; then
+        read -s -p "MySQL password (same as in bot admin): " PARTNER_MYSQL_PASSWORD
+        echo
+    fi
+    if [ -z "$PARTNER_MYSQL_PASSWORD" ]; then
+        colorized_echo red "MySQL password cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$PARTNER_ADMIN_USERNAME" ]; then
+        read -p "Panel admin username (from bot admin): " PARTNER_ADMIN_USERNAME
+    fi
+    if [ -z "$PARTNER_ADMIN_USERNAME" ]; then
+        colorized_echo red "Admin username cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$PARTNER_ADMIN_PASSWORD_HASH" ]; then
+        read -s -p "Admin password hash (from bot admin view): " PARTNER_ADMIN_PASSWORD_HASH
+        echo
+    fi
+    if [ -z "$PARTNER_ADMIN_PASSWORD_HASH" ]; then
+        colorized_echo red "Admin password hash cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$PARTNER_SUBSCRIPTION_TITLE" ]; then
+        read -p "Subscription title in client apps: " PARTNER_SUBSCRIPTION_TITLE
+    fi
+    if [ -z "$PARTNER_SUBSCRIPTION_TITLE" ]; then
+        colorized_echo red "Subscription title cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$PARTNER_SUPPORT_TELEGRAM" ]; then
+        read -p "Support Telegram username (without t.me/): " PARTNER_SUPPORT_TELEGRAM
+    fi
+    if [ -z "$PARTNER_SUPPORT_TELEGRAM" ]; then
+        colorized_echo red "Support Telegram username cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$PARTNER_BOT_TELEGRAM" ]; then
+        read -p "Bot Telegram username (without t.me/): " PARTNER_BOT_TELEGRAM
+    fi
+    if [ -z "$PARTNER_BOT_TELEGRAM" ]; then
+        colorized_echo red "Bot Telegram username cannot be empty."
+        exit 1
+    fi
+}
+
+parse_partner_install_args() {
+    PARTNER_DATABASE_TYPE="mysql"
+    local marzban_version="latest"
+    local marzban_version_set="false"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --domain)
+                PARTNER_DOMAIN=$(normalize_domain "$2")
+                shift 2
+                ;;
+            --cert-email)
+                PARTNER_CERT_EMAIL="$2"
+                shift 2
+                ;;
+            --mysql-password)
+                PARTNER_MYSQL_PASSWORD="$2"
+                shift 2
+                ;;
+            --admin-username)
+                PARTNER_ADMIN_USERNAME="$2"
+                shift 2
+                ;;
+            --admin-password-hash)
+                PARTNER_ADMIN_PASSWORD_HASH="$2"
+                shift 2
+                ;;
+            --subscription-title)
+                PARTNER_SUBSCRIPTION_TITLE="$2"
+                shift 2
+                ;;
+            --support-telegram)
+                PARTNER_SUPPORT_TELEGRAM="$2"
+                shift 2
+                ;;
+            --bot-telegram)
+                PARTNER_BOT_TELEGRAM="$2"
+                shift 2
+                ;;
+            --database)
+                PARTNER_DATABASE_TYPE="$2"
+                shift 2
+                ;;
+            --uvicorn-port)
+                PARTNER_UVICORN_PORT="$2"
+                shift 2
+                ;;
+            --version)
+                if [[ "$marzban_version_set" == "true" ]]; then
+                    colorized_echo red "Error: Cannot use --dev and --version options simultaneously."
+                    exit 1
+                fi
+                marzban_version="$2"
+                marzban_version_set="true"
+                shift 2
+                ;;
+            --dev)
+                if [[ "$marzban_version_set" == "true" ]]; then
+                    colorized_echo red "Error: Cannot use --dev and --version options simultaneously."
+                    exit 1
+                fi
+                marzban_version="dev"
+                marzban_version_set="true"
+                shift
+                ;;
+            --skip-dns-check)
+                PARTNER_SKIP_DNS_CHECK="true"
+                shift
+                ;;
+            --skip-cert)
+                PARTNER_SKIP_CERT="true"
+                shift
+                ;;
+            --skip-firewall)
+                PARTNER_SKIP_FIREWALL="true"
+                shift
+                ;;
+            --non-interactive|-y)
+                PARTNER_NON_INTERACTIVE="true"
+                shift
+                ;;
+            --no-logs)
+                PARTNER_NO_LOGS="true"
+                shift
+                ;;
+            *)
+                colorized_echo red "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    PARTNER_MARZBAN_VERSION="$marzban_version"
+}
+
+install_partner_command() {
+    parse_partner_install_args "$@"
+    check_running_as_root
+
+    if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+        require_partner_params
+    else
+        prompt_partner_install_params
+    fi
+
+    PARTNER_DOMAIN=$(normalize_domain "$PARTNER_DOMAIN")
+    PARTNER_MODE="true"
+    MYSQL_PASSWORD="$PARTNER_MYSQL_PASSWORD"
+
+    if is_marzban_installed; then
+        colorized_echo red "Marzban is already installed at $APP_DIR"
+        if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+            colorized_echo red "Aborting: panel already installed. Remove it first or run without --non-interactive."
+            exit 1
+        fi
+        read -p "Do you want to override the previous installation? (y/n) "
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            colorized_echo red "Aborted installation"
+            exit 1
+        fi
+    fi
+
+    detect_os
+    if ! command -v jq >/dev/null 2>&1; then
+        install_package jq
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        install_package curl
+    fi
+    if ! command -v docker >/dev/null 2>&1; then
+        install_docker
+    fi
+    if ! command -v yq >/dev/null 2>&1; then
+        install_yq
+    fi
+    detect_compose
+    install_marzban_script
+
+    check_version_exists() {
+        local version=$1
+        local repo_url="https://api.github.com/repos/npvpn/panel/releases"
+        if [ "$version" == "latest" ] || [ "$version" == "dev" ]; then
+            return 0
+        fi
+        local response
+        response=$(curl -s "$repo_url")
+        if echo "$response" | jq -e ".[] | select(.tag_name == \"${version}\")" > /dev/null; then
+            return 0
+        fi
+        return 1
+    }
+
+    check_domain_dns "$PARTNER_DOMAIN"
+    configure_partner_firewall
+    issue_ssl_certificate "$PARTNER_DOMAIN" "$PARTNER_CERT_EMAIL"
+
+    local marzban_version="$PARTNER_MARZBAN_VERSION"
+    local database_type="$PARTNER_DATABASE_TYPE"
+
+    if [[ "$database_type" != "mysql" && "$database_type" != "mariadb" ]]; then
+        colorized_echo red "Partner install supports only mysql or mariadb database."
+        exit 1
+    fi
+
+    if [[ "$marzban_version" == "latest" || "$marzban_version" == "dev" || "$marzban_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if check_version_exists "$marzban_version"; then
+            install_marzban "$marzban_version" "$database_type"
+            colorized_echo green "Installing $marzban_version version"
+        else
+            colorized_echo red "Version $marzban_version does not exist."
+            exit 1
+        fi
+    else
+        colorized_echo red "Invalid version format. Please enter a valid version (e.g. v0.5.2)"
+        exit 1
+    fi
+
+    up_marzban
+    wait_for_marzban_ready "$PARTNER_UVICORN_PORT"
+    create_panel_admin "$PARTNER_ADMIN_USERNAME" "$PARTNER_ADMIN_PASSWORD_HASH"
+    verify_partner_install "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
+    print_post_install_checklist "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
+
+    if [ "$PARTNER_NO_LOGS" = "false" ]; then
+        colorized_echo yellow "Press Ctrl+C to stop following logs."
+        follow_marzban_logs
+    fi
 }
 
 install_command() {
@@ -1591,6 +2231,7 @@ usage() {
     colorized_echo yellow "  logs            $(tput sgr0)– Show logs"
     colorized_echo yellow "  cli             $(tput sgr0)– Marzban CLI"
     colorized_echo yellow "  install         $(tput sgr0)– Install Marzban"
+    colorized_echo yellow "  install-partner $(tput sgr0)– Install partner panel (SSL, certbot, admin)"
     colorized_echo yellow "  update          $(tput sgr0)– Update to latest version"
     colorized_echo yellow "  uninstall       $(tput sgr0)– Uninstall Marzban"
     colorized_echo yellow "  install-script  $(tput sgr0)– Install Marzban script"
@@ -1629,6 +2270,8 @@ case "$1" in
         shift; backup_service "$@";;
     install)
         shift; install_command "$@";;
+    install-partner)
+        shift; install_partner_command "$@";;
     update)
         shift; update_command "$@";;
     uninstall)
