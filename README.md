@@ -1,56 +1,56 @@
 # Marzban-scripts
-Scripts for Marzban
+Скрипты для Marzban
 
-## Installing Marzban
-- **Install Marzban with SQLite**:
+## Установка Marzban
+- **Установить Marzban с SQLite**:
 
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install
 ```
 
-- **Install Marzban with MySQL**:
+- **Установить Marzban с MySQL**:
 
   ```bash
   sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mysql
   ```
 
-- **Install Marzban with MariaDB**:
+- **Установить Marzban с MariaDB**:
 
   ```bash
   sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb
   ```
   
-- **Install Marzban with MariaDB and Dev branch**:
+- **Установить Marzban с MariaDB и dev-веткой**:
 
   ```bash
   sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --dev
   ```
 
-- **Install Marzban with MariaDB and Manual version**:
+- **Установить Marzban с MariaDB и конкретной версией**:
 
   ```bash
   sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --version v0.5.2
   ```
 
-- **Update or Change Xray-core Version**:
+- **Обновить или изменить версию Xray-core**:
 
   ```bash
   sudo marzban core-update
   ```
 
-## Installing partner panel
+## Установка партнёрской панели
 
-Automated install for a partner server (UFW, certbot, SSL, port 8001, MySQL, panel admin).
+Автоматическая установка для партнёрского сервера (UFW, certbot, SSL, порт 8001, MySQL, администратор панели).
 
-**Before running:** create an administrator in the bot admin panel and copy the login, MySQL password, and password hash.
+**Перед запуском:** создайте администратора в админке бота и подготовьте логин, пароль MySQL и хеш пароля.
 
-**Interactive install:**
+**Интерактивная установка:**
 
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install-partner
 ```
 
-**Non-interactive install:**
+**Неинтерактивная установка:**
 
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install-partner \
@@ -65,34 +65,97 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   --non-interactive
 ```
 
-Optional flags: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
+Дополнительные флаги: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
 
 
-## Installing Marzban-node
-Install Marzban-node on your server using this command
+## Установка Marzban-node
+Установить Marzban-node на сервер:
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install
 ```
-Install Marzban-node on your server using this command with custom name:
+Установить Marzban-node на сервер с кастомным именем:
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install --name marzban-node2
 ```
-Or you can only install this script (marzban-node command) on your server by using this command
+Или можно установить только сам скрипт (`marzban-node` команда) на сервер:
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install-script
 ```
 
-Use `help` to view all commands:
+Для просмотра всех команд используйте `help`:
 ```marzban-node help```
 
-- **Update or Change Xray-core Version**:
+- **Обновить или изменить версию Xray-core**:
 
   ```bash
   sudo marzban-node core-update
   ```
 
-- **Migrate existing node to auto-updates via Watchtower**:
+- **Мигрировать существующую ноду на автообновления через Watchtower**:
 
   ```bash
   sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ migrate
   ```
+
+## Блокировщик ASN для жалоб по ноде
+
+В репозитории есть вспомогательный скрипт `asn-blocker.sh` для быстрой блокировки префиксов ASN назначения через `nftables`, хранения локального состояния и просмотра срабатываний.
+
+### Что делает скрипт
+
+- Ведёт список заблокированных ASN в `/var/lib/asn-blocker/blocked_asns.txt`
+- Получает префиксы ASN из RIPE Stat (с fallback на BGPView)
+- Загружает префиксы в `nftables`-сеты (`inet asnblock`)
+- Блокирует исходящий трафик на префиксы заблокированных ASN
+- Добавляет префикс логов `ASN-BLOCK` для заблокированных пакетов
+- Опционально пишет отдельный лог `/var/log/asn-blocker.log` с ротацией через `logrotate`
+
+### Использование
+
+```bash
+sudo ./asn-blocker.sh init
+sudo ./asn-blocker.sh block AS28753
+sudo ./asn-blocker.sh block 28753 210644
+sudo ./asn-blocker.sh list
+sudo ./asn-blocker.sh status
+sudo ./asn-blocker.sh check-ip 46.165.199.9
+sudo ./asn-blocker.sh refresh
+sudo ./asn-blocker.sh unblock AS28753
+```
+
+Скачать и установить как локальную команду `asn-blocker`:
+
+```bash
+sudo curl -fsSL https://github.com/npvpn/Marzban-scripts/raw/master/asn-blocker.sh -o /usr/local/bin/asn-blocker && sudo chmod +x /usr/local/bin/asn-blocker
+```
+
+После установки можно запускать без `./`:
+
+```bash
+sudo asn-blocker init
+sudo asn-blocker block AS28753
+sudo asn-blocker list
+```
+
+Расшифровка команд:
+
+- `sudo ./asn-blocker.sh init` — инициализирует структуру `nftables` (таблица, chain, sets и правила блокировки).
+- `sudo ./asn-blocker.sh block AS28753` — блокирует один ASN: получает его префиксы и добавляет их в `nftables`.
+- `sudo ./asn-blocker.sh block 28753 210644` — блокирует сразу несколько ASN одной командой.
+- `sudo ./asn-blocker.sh list` — показывает, какие ASN уже добавлены в блок-лист.
+- `sudo ./asn-blocker.sh status` — выводит общий статус: активные ASN и количество загруженных префиксов.
+- `sudo ./asn-blocker.sh check-ip 46.165.199.9` — проверяет, попадает ли конкретный IP в текущие заблокированные ASN-префиксы.
+- `sudo ./asn-blocker.sh refresh` — обновляет префиксы для всех ранее добавленных ASN.
+- `sudo ./asn-blocker.sh unblock AS28753` — удаляет ASN из блок-листа и убирает его префиксы из `nftables`.
+
+### Логирование и хранение
+
+```bash
+sudo ./asn-blocker.sh setup-logging
+sudo ./asn-blocker.sh logs 200
+```
+
+`setup-logging` создаёт:
+
+- `/etc/rsyslog.d/30-asn-blocker.conf`
+- `/etc/logrotate.d/asn-blocker` (ежедневная ротация, 14 файлов, сжатие)
