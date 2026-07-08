@@ -15,6 +15,8 @@ LOG_FILE="/var/log/asn-blocker.log"
 RSYSLOG_CONF="/etc/rsyslog.d/30-asn-blocker.conf"
 LOGROTATE_CONF="/etc/logrotate.d/asn-blocker"
 CRON_FILE="/etc/cron.d/asn-blocker-refresh"
+JOURNALD_DROPIN_DIR="/etc/systemd/journald.conf.d"
+JOURNALD_DROPIN_FILE="${JOURNALD_DROPIN_DIR}/30-asn-blocker.conf"
 
 usage() {
     cat <<'EOF'
@@ -470,8 +472,10 @@ PY
 
 setup_logging() {
     cat >"$RSYSLOG_CONF" <<'EOF'
-:msg, contains, "ASN-BLOCK" -/var/log/asn-blocker.log
-& stop
+if ($syslogfacility-text == 'kern' and $msg contains 'ASN-BLOCK') then {
+    action(type="omfile" file="/var/log/asn-blocker.log")
+    stop
+}
 EOF
 
     cat >"$LOGROTATE_CONF" <<'EOF'
@@ -488,6 +492,16 @@ EOF
 
     touch "$LOG_FILE"
     chmod 0640 "$LOG_FILE"
+
+    mkdir -p "$JOURNALD_DROPIN_DIR"
+    cat >"$JOURNALD_DROPIN_FILE" <<'EOF'
+[Journal]
+ForwardToSyslog=yes
+EOF
+
+    if systemctl is-active --quiet systemd-journald; then
+        systemctl restart systemd-journald || true
+    fi
 
     if systemctl is-active --quiet rsyslog; then
         systemctl restart rsyslog
@@ -542,6 +556,9 @@ show_logs() {
     if [[ -f "$LOG_FILE" ]]; then
         echo
         echo "Tail of $LOG_FILE:"
+        if [[ ! -s "$LOG_FILE" ]]; then
+            echo "(file is empty yet; entries may still be only in journald)"
+        fi
         tail -n "$lines" "$LOG_FILE" || true
     fi
 }

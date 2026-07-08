@@ -152,3 +152,4 @@ sudo asn-blocker cron-status
 - `/etc/rsyslog.d/30-asn-blocker.conf`
 - `/etc/logrotate.d/asn-blocker` (ежедневная ротация, 14 файлов, сжатие)
 - `/etc/cron.d/asn-blocker-refresh` (ежедневный refresh в 04:15)
+- `/etc/systemd/journald.conf.d/30-asn-blocker.conf` (`ForwardToSyslog=yes` для стабильной доставки kernel-логов в rsyslog)
