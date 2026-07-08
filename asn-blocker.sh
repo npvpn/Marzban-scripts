@@ -14,14 +14,15 @@ NFT_CHAIN_OUT="output"
 LOG_FILE="/var/log/asn-blocker.log"
 RSYSLOG_CONF="/etc/rsyslog.d/30-asn-blocker.conf"
 LOGROTATE_CONF="/etc/logrotate.d/asn-blocker"
+CRON_FILE="/etc/cron.d/asn-blocker-refresh"
 
 usage() {
     cat <<'EOF'
 ASN blocker for nftables
 
 Usage:
+  asn-blocker.sh install
   asn-blocker.sh install-deps
-  asn-blocker.sh init
   asn-blocker.sh block <ASN> [ASN...]
   asn-blocker.sh unblock <ASN> [ASN...]
   asn-blocker.sh refresh [ASN...]
@@ -29,10 +30,11 @@ Usage:
   asn-blocker.sh status
   asn-blocker.sh check-ip <IPv4|IPv6>
   asn-blocker.sh logs [lines]
-  asn-blocker.sh setup-logging
+  asn-blocker.sh cron-status
   asn-blocker.sh help
 
 Examples:
+  sudo ./asn-blocker.sh install
   sudo ./asn-blocker.sh block AS28753
   sudo ./asn-blocker.sh block 28753 210644
   sudo ./asn-blocker.sh list
@@ -111,6 +113,14 @@ install_missing_dependencies() {
     command -v jq >/dev/null 2>&1 || missing+=("jq")
     command -v rg >/dev/null 2>&1 || missing+=("ripgrep")
     command -v python3 >/dev/null 2>&1 || missing+=("python3")
+    command -v crontab >/dev/null 2>&1 || {
+        case "$(detect_pkg_manager)" in
+            apt) missing+=("cron") ;;
+            dnf|yum|pacman) missing+=("cronie") ;;
+            zypper) missing+=("cron") ;;
+            *) missing+=("cron") ;;
+        esac
+    }
 
     if [[ "$mode" == "with-logging" || "$mode" == "all" ]]; then
         command -v rsyslogd >/dev/null 2>&1 || missing+=("rsyslog")
@@ -487,6 +497,44 @@ EOF
     fi
 }
 
+enable_cron_service() {
+    if systemctl list-unit-files | rg -q '^cron\.service'; then
+        systemctl enable --now cron >/dev/null 2>&1 || true
+    elif systemctl list-unit-files | rg -q '^crond\.service'; then
+        systemctl enable --now crond >/dev/null 2>&1 || true
+    fi
+}
+
+setup_refresh_cron() {
+    cat >"$CRON_FILE" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Refresh blocked ASN prefixes daily at 04:15
+15 4 * * * root /usr/local/bin/asn-blocker refresh >/var/log/asn-blocker-refresh.log 2>&1
+EOF
+    chmod 0644 "$CRON_FILE"
+    enable_cron_service
+}
+
+show_cron_status() {
+    if [[ -f "$CRON_FILE" ]]; then
+        echo "Cron refresh file: $CRON_FILE"
+        cat "$CRON_FILE"
+    else
+        echo "Cron refresh file not found."
+    fi
+}
+
+run_bootstrap() {
+    install_missing_dependencies "all"
+    ensure_state_dirs
+    init_nft
+    setup_logging
+    setup_refresh_cron
+    echo "Install complete: dependencies, nft init, logging, and cron refresh are configured."
+}
+
 show_logs() {
     local lines="${1:-100}"
     echo "Recent kernel log matches:"
@@ -499,65 +547,76 @@ show_logs() {
 }
 
 main() {
-    local cmd="${1:-help}"
+    local cmd="${1:-install}"
     shift || true
 
     require_root
-    if [[ "$cmd" == "install-deps" ]]; then
-        install_missing_dependencies "all"
-        echo "Dependencies are installed."
+    if [[ "$cmd" == "help" || "$cmd" == "-h" || "$cmd" == "--help" ]]; then
+        usage
         exit 0
     fi
-    if [[ "$cmd" == "setup-logging" ]]; then
-        install_missing_dependencies "with-logging"
-    else
-        install_missing_dependencies "base"
-    fi
-    require_cmd nft
-    require_cmd curl
-    require_cmd jq
-    require_cmd rg
-    require_cmd python3
-    ensure_state_dirs
 
     case "$cmd" in
+        install)
+            run_bootstrap
+            ;;
         install-deps)
             install_missing_dependencies "all"
             echo "Dependencies are installed."
             ;;
         init)
+            install_missing_dependencies "all"
+            ensure_state_dirs
             init_nft
+            setup_logging
+            setup_refresh_cron
             echo "Initialized nftables structures."
             ;;
         block)
+            install_missing_dependencies "all"
+            ensure_state_dirs
+            setup_logging
+            setup_refresh_cron
             [[ $# -ge 1 ]] || { echo "Provide at least one ASN."; exit 1; }
             block_asn "$@"
             ;;
         unblock)
+            install_missing_dependencies "all"
+            ensure_state_dirs
+            setup_logging
+            setup_refresh_cron
             [[ $# -ge 1 ]] || { echo "Provide at least one ASN."; exit 1; }
             unblock_asn "$@"
             ;;
         refresh)
+            install_missing_dependencies "all"
+            ensure_state_dirs
+            setup_logging
+            setup_refresh_cron
             refresh_asn "$@"
             ;;
         list)
+            install_missing_dependencies "all"
+            ensure_state_dirs
             list_asns
             ;;
         status)
+            install_missing_dependencies "all"
+            ensure_state_dirs
             status_report
             ;;
         check-ip)
+            install_missing_dependencies "all"
+            ensure_state_dirs
             [[ $# -eq 1 ]] || { echo "Usage: check-ip <IP>"; exit 1; }
             check_ip "$1"
             ;;
-        setup-logging)
-            setup_logging
+        cron-status)
+            show_cron_status
             ;;
         logs)
+            install_missing_dependencies "all"
             show_logs "${1:-100}"
-            ;;
-        help|-h|--help)
-            usage
             ;;
         *)
             echo "Unknown command: $cmd" >&2

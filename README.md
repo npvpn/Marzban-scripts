@@ -108,56 +108,47 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 - Загружает префиксы в `nftables`-сеты (`inet asnblock`)
 - Блокирует исходящий трафик на префиксы заблокированных ASN
 - Добавляет префикс логов `ASN-BLOCK` для заблокированных пакетов
-- Опционально пишет отдельный лог `/var/log/asn-blocker.log` с ротацией через `logrotate`
+- Всегда настраивает отдельный лог `/var/log/asn-blocker.log` и ротацию через `logrotate`
+- Всегда настраивает автообновление префиксов через cron (`/etc/cron.d/asn-blocker-refresh`)
 
-### Использование
-
-```bash
-sudo ./asn-blocker.sh install-deps
-sudo ./asn-blocker.sh init
-sudo ./asn-blocker.sh block AS28753
-sudo ./asn-blocker.sh block 28753 210644
-sudo ./asn-blocker.sh list
-sudo ./asn-blocker.sh status
-sudo ./asn-blocker.sh check-ip 46.165.199.9
-sudo ./asn-blocker.sh refresh
-sudo ./asn-blocker.sh unblock AS28753
-```
-
-Скачать и установить как локальную команду `asn-blocker`:
+### Быстрая установка как команды `asn-blocker`
 
 ```bash
-sudo curl -fsSL https://github.com/npvpn/Marzban-scripts/raw/master/asn-blocker.sh -o /usr/local/bin/asn-blocker && sudo chmod +x /usr/local/bin/asn-blocker
+sudo curl -fsSL https://github.com/npvpn/Marzban-scripts/raw/master/asn-blocker.sh -o /usr/local/bin/asn-blocker && \
+sudo chmod +x /usr/local/bin/asn-blocker && \
+sudo asn-blocker install
 ```
 
-После установки можно запускать без `./`:
+Команда `install` автоматически:
 
-```bash
-sudo asn-blocker init
-sudo asn-blocker block AS28753
-sudo asn-blocker list
-```
+- устанавливает зависимости (`nftables`, `curl`, `jq`, `ripgrep`, `python3`, `cron`, `rsyslog`, `logrotate`);
+- инициализирует `nftables` таблицу/сеты;
+- настраивает логирование блокировок;
+- добавляет ежедневный cron refresh.
 
 Расшифровка команд:
 
-- `sudo ./asn-blocker.sh install-deps` — устанавливает недостающие зависимости (`nftables`, `curl`, `jq`, `ripgrep`, `python3`, а для логирования также `rsyslog` и `logrotate`).
-- `sudo ./asn-blocker.sh init` — инициализирует структуру `nftables` (таблица, chain, sets и правила блокировки).
-- `sudo ./asn-blocker.sh block AS28753` — блокирует один ASN: получает его префиксы и добавляет их в `nftables`.
-- `sudo ./asn-blocker.sh block 28753 210644` — блокирует сразу несколько ASN одной командой.
-- `sudo ./asn-blocker.sh list` — показывает, какие ASN уже добавлены в блок-лист.
-- `sudo ./asn-blocker.sh status` — выводит общий статус: активные ASN и количество загруженных префиксов.
-- `sudo ./asn-blocker.sh check-ip 46.165.199.9` — проверяет, попадает ли конкретный IP в текущие заблокированные ASN-префиксы.
-- `sudo ./asn-blocker.sh refresh` — обновляет префиксы для всех ранее добавленных ASN.
-- `sudo ./asn-blocker.sh unblock AS28753` — удаляет ASN из блок-листа и убирает его префиксы из `nftables`.
+- `sudo asn-blocker install` — полный bootstrap (зависимости + init + логи + cron).
+- `sudo asn-blocker install-deps` — только установка недостающих зависимостей.
+- `sudo asn-blocker block AS28753` — блокирует один ASN: получает его префиксы и добавляет их в `nftables`.
+- `sudo asn-blocker block 28753 210644` — блокирует сразу несколько ASN одной командой.
+- `sudo asn-blocker list` — показывает, какие ASN уже добавлены в блок-лист.
+- `sudo asn-blocker status` — выводит общий статус: активные ASN и количество загруженных префиксов.
+- `sudo asn-blocker check-ip 46.165.199.9` — проверяет, попадает ли конкретный IP в текущие заблокированные ASN-префиксы.
+- `sudo asn-blocker refresh` — обновляет префиксы для всех ранее добавленных ASN.
+- `sudo asn-blocker unblock AS28753` — удаляет ASN из блок-листа и убирает его префиксы из `nftables`.
+- `sudo asn-blocker logs 200` — показывает последние логи блокировок из `journald` и `/var/log/asn-blocker.log`.
+- `sudo asn-blocker cron-status` — показывает текущую cron-задачу автообновления.
 
 ### Логирование и хранение
 
 ```bash
-sudo ./asn-blocker.sh setup-logging
-sudo ./asn-blocker.sh logs 200
+sudo asn-blocker logs 200
+sudo asn-blocker cron-status
 ```
 
-`setup-logging` создаёт:
+По умолчанию создаются:
 
 - `/etc/rsyslog.d/30-asn-blocker.conf`
 - `/etc/logrotate.d/asn-blocker` (ежедневная ротация, 14 файлов, сжатие)
+- `/etc/cron.d/asn-blocker-refresh` (ежедневный refresh в 04:15)
