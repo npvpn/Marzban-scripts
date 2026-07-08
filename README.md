@@ -113,6 +113,7 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 ### Использование
 
 ```bash
+sudo ./asn-blocker.sh install-deps
 sudo ./asn-blocker.sh init
 sudo ./asn-blocker.sh block AS28753
 sudo ./asn-blocker.sh block 28753 210644
@@ -139,6 +140,7 @@ sudo asn-blocker list
 
 Расшифровка команд:
 
+- `sudo ./asn-blocker.sh install-deps` — устанавливает недостающие зависимости (`nftables`, `curl`, `jq`, `ripgrep`, `python3`, а для логирования также `rsyslog` и `logrotate`).
 - `sudo ./asn-blocker.sh init` — инициализирует структуру `nftables` (таблица, chain, sets и правила блокировки).
 - `sudo ./asn-blocker.sh block AS28753` — блокирует один ASN: получает его префиксы и добавляет их в `nftables`.
 - `sudo ./asn-blocker.sh block 28753 210644` — блокирует сразу несколько ASN одной командой.

@@ -20,6 +20,7 @@ usage() {
 ASN blocker for nftables
 
 Usage:
+  asn-blocker.sh install-deps
   asn-blocker.sh init
   asn-blocker.sh block <ASN> [ASN...]
   asn-blocker.sh unblock <ASN> [ASN...]
@@ -52,6 +53,77 @@ require_cmd() {
         echo "Missing required command: $cmd" >&2
         exit 1
     fi
+}
+
+detect_pkg_manager() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        echo "yum"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "zypper"
+    else
+        echo "unknown"
+    fi
+}
+
+install_packages() {
+    local manager="$1"
+    shift
+    local packages=("$@")
+    [[ ${#packages[@]} -eq 0 ]] && return 0
+
+    case "$manager" in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y "${packages[@]}"
+            ;;
+        dnf)
+            dnf install -y "${packages[@]}"
+            ;;
+        yum)
+            yum install -y "${packages[@]}"
+            ;;
+        pacman)
+            pacman -Sy --noconfirm "${packages[@]}"
+            ;;
+        zypper)
+            zypper --non-interactive install --no-recommends "${packages[@]}"
+            ;;
+        *)
+            echo "Unsupported OS package manager. Install dependencies manually: ${packages[*]}" >&2
+            return 1
+            ;;
+    esac
+}
+
+install_missing_dependencies() {
+    local mode="${1:-base}"
+    local manager missing=()
+
+    command -v nft >/dev/null 2>&1 || missing+=("nftables")
+    command -v curl >/dev/null 2>&1 || missing+=("curl")
+    command -v jq >/dev/null 2>&1 || missing+=("jq")
+    command -v rg >/dev/null 2>&1 || missing+=("ripgrep")
+    command -v python3 >/dev/null 2>&1 || missing+=("python3")
+
+    if [[ "$mode" == "with-logging" || "$mode" == "all" ]]; then
+        command -v rsyslogd >/dev/null 2>&1 || missing+=("rsyslog")
+        command -v logrotate >/dev/null 2>&1 || missing+=("logrotate")
+    fi
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    manager="$(detect_pkg_manager)"
+    echo "Installing missing dependencies: ${missing[*]}"
+    install_packages "$manager" "${missing[@]}"
 }
 
 ensure_state_dirs() {
@@ -140,10 +212,10 @@ init_nft() {
     local chain_dump
     chain_dump="$(nft list chain "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_CHAIN_OUT" || true)"
     if ! rg -q "ip daddr @${NFT_SET_V4}" <<<"$chain_dump"; then
-        nft add rule "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_CHAIN_OUT" ip daddr "@${NFT_SET_V4}" limit rate 30/second burst 100 packets log prefix '"ASN-BLOCK v4 "' level warning counter drop
+        nft add rule "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_CHAIN_OUT" ip daddr "@${NFT_SET_V4}" limit rate 30/second burst 100 packets log prefix '"ASN-BLOCK v4 "' level warn counter drop
     fi
     if ! rg -q "ip6 daddr @${NFT_SET_V6}" <<<"$chain_dump"; then
-        nft add rule "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_CHAIN_OUT" ip6 daddr "@${NFT_SET_V6}" limit rate 30/second burst 100 packets log prefix '"ASN-BLOCK v6 "' level warning counter drop
+        nft add rule "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_CHAIN_OUT" ip6 daddr "@${NFT_SET_V6}" limit rate 30/second burst 100 packets log prefix '"ASN-BLOCK v6 "' level warn counter drop
     fi
 }
 
@@ -348,6 +420,16 @@ main() {
     shift || true
 
     require_root
+    if [[ "$cmd" == "install-deps" ]]; then
+        install_missing_dependencies "all"
+        echo "Dependencies are installed."
+        exit 0
+    fi
+    if [[ "$cmd" == "setup-logging" ]]; then
+        install_missing_dependencies "with-logging"
+    else
+        install_missing_dependencies "base"
+    fi
     require_cmd nft
     require_cmd curl
     require_cmd jq
@@ -356,6 +438,10 @@ main() {
     ensure_state_dirs
 
     case "$cmd" in
+        install-deps)
+            install_missing_dependencies "all"
+            echo "Dependencies are installed."
+            ;;
         init)
             init_nft
             echo "Initialized nftables structures."
