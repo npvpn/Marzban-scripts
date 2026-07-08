@@ -255,22 +255,36 @@ rebuild_sets() {
     nft flush set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4"
     nft flush set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6"
 
-    local f line
+    local f line tmp_all_v4 tmp_all_v6
+    tmp_all_v4="$(mktemp)"
+    tmp_all_v6="$(mktemp)"
+
     shopt -s nullglob
     for f in "$PREFIX_DIR"/*.v4; do
-        while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            nft add element "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4" "{ $line }"
-        done <"$f"
+        cat "$f" >>"$tmp_all_v4"
+        printf '\n' >>"$tmp_all_v4"
     done
 
     for f in "$PREFIX_DIR"/*.v6; do
-        while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            nft add element "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6" "{ $line }"
-        done <"$f"
+        cat "$f" >>"$tmp_all_v6"
+        printf '\n' >>"$tmp_all_v6"
     done
     shopt -u nullglob
+
+    collapse_prefixes_file "$tmp_all_v4"
+    collapse_prefixes_file "$tmp_all_v6"
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        nft add element "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4" "{ $line }"
+    done <"$tmp_all_v4"
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        nft add element "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6" "{ $line }"
+    done <"$tmp_all_v6"
+
+    rm -f "$tmp_all_v4" "$tmp_all_v6"
 }
 
 block_asn() {
