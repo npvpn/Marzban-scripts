@@ -224,16 +224,39 @@ PY
 }
 
 init_nft() {
+    local rebuild_table="0"
+
     if ! nft list table "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" >/dev/null 2>&1; then
         nft add table "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME"
     fi
 
+    if nft list set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4" >/dev/null 2>&1; then
+        local set_v4_dump
+        set_v4_dump="$(nft list set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4" 2>/dev/null || true)"
+        if ! rg -q "auto-merge" <<<"$set_v4_dump"; then
+            rebuild_table="1"
+        fi
+    fi
+
+    if nft list set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6" >/dev/null 2>&1; then
+        local set_v6_dump
+        set_v6_dump="$(nft list set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6" 2>/dev/null || true)"
+        if ! rg -q "auto-merge" <<<"$set_v6_dump"; then
+            rebuild_table="1"
+        fi
+    fi
+
+    if [[ "$rebuild_table" == "1" ]]; then
+        nft delete table "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" || true
+        nft add table "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME"
+    fi
+
     if ! nft list set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4" >/dev/null 2>&1; then
-        nft add set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4" "{ type ipv4_addr; flags interval; }"
+        nft add set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V4" "{ type ipv4_addr; flags interval,auto-merge; }"
     fi
 
     if ! nft list set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6" >/dev/null 2>&1; then
-        nft add set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6" "{ type ipv6_addr; flags interval; }"
+        nft add set "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_SET_V6" "{ type ipv6_addr; flags interval,auto-merge; }"
     fi
 
     if ! nft list chain "$NFT_TABLE_FAMILY" "$NFT_TABLE_NAME" "$NFT_CHAIN_OUT" >/dev/null 2>&1; then
