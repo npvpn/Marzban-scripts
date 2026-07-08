@@ -18,6 +18,9 @@ CRON_FILE="/etc/cron.d/asn-blocker-refresh"
 JOURNALD_DROPIN_DIR="/etc/systemd/journald.conf.d"
 JOURNALD_DROPIN_FILE="${JOURNALD_DROPIN_DIR}/30-asn-blocker.conf"
 
+LOG_OWNER_USER="root"
+LOG_OWNER_GROUP="adm"
+
 usage() {
     cat <<'EOF'
 ASN blocker for nftables
@@ -141,6 +144,22 @@ install_missing_dependencies() {
 ensure_state_dirs() {
     mkdir -p "$PREFIX_DIR"
     touch "$ASN_LIST_FILE"
+}
+
+resolve_log_owner() {
+    if id -u syslog >/dev/null 2>&1; then
+        LOG_OWNER_USER="syslog"
+    else
+        LOG_OWNER_USER="root"
+    fi
+
+    if getent group adm >/dev/null 2>&1; then
+        LOG_OWNER_GROUP="adm"
+    elif getent group syslog >/dev/null 2>&1; then
+        LOG_OWNER_GROUP="syslog"
+    else
+        LOG_OWNER_GROUP="root"
+    fi
 }
 
 detect_nft_set_flags() {
@@ -471,6 +490,8 @@ PY
 }
 
 setup_logging() {
+    resolve_log_owner
+
     cat >"$RSYSLOG_CONF" <<'EOF'
 if ($syslogfacility-text == 'kern' and $msg contains 'ASN-BLOCK') then {
     action(type="omfile" file="/var/log/asn-blocker.log")
@@ -478,7 +499,7 @@ if ($syslogfacility-text == 'kern' and $msg contains 'ASN-BLOCK') then {
 }
 EOF
 
-    cat >"$LOGROTATE_CONF" <<'EOF'
+    cat >"$LOGROTATE_CONF" <<EOF
 /var/log/asn-blocker.log {
     daily
     rotate 14
@@ -486,11 +507,12 @@ EOF
     delaycompress
     missingok
     notifempty
-    create 0640 root adm
+    create 0640 ${LOG_OWNER_USER} ${LOG_OWNER_GROUP}
 }
 EOF
 
     touch "$LOG_FILE"
+    chown "${LOG_OWNER_USER}:${LOG_OWNER_GROUP}" "$LOG_FILE" || true
     chmod 0640 "$LOG_FILE"
 
     mkdir -p "$JOURNALD_DROPIN_DIR"
