@@ -190,6 +190,37 @@ fetch_prefixes_for_asn() {
         echo "No prefixes found for AS${asn}" >&2
         return 1
     fi
+
+    collapse_prefixes_file "$out_v4"
+    collapse_prefixes_file "$out_v6"
+}
+
+collapse_prefixes_file() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+
+    python3 - "$file" <<'PY'
+import ipaddress
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+raw = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+if not raw:
+    path.write_text("")
+    raise SystemExit(0)
+
+nets = []
+for line in raw:
+    try:
+        nets.append(ipaddress.ip_network(line, strict=False))
+    except ValueError:
+        # ignore malformed lines from external feeds
+        continue
+
+collapsed = list(ipaddress.collapse_addresses(sorted(nets, key=lambda n: (n.version, int(n.network_address), n.prefixlen))))
+path.write_text("\n".join(str(n) for n in collapsed) + ("\n" if collapsed else ""))
+PY
 }
 
 init_nft() {
