@@ -75,10 +75,13 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   --subscription-title 'My VPN' \
   --support-telegram support_bot \
   --bot-telegram my_vpn_bot \
+  --bot-server-ip 1.1.1.1 \
   --non-interactive
 ```
 
-Дополнительные флаги: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
+Дополнительные флаги: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--bot-server-ip <IPv4>`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
+
+`--bot-server-ip` — публичный IP платформы бота. UFW разрешит доступ к MySQL `3306/tcp` только для сервера платформы.
 
 
 ## Установка Marzban-node

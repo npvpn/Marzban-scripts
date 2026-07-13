@@ -27,6 +27,7 @@ PARTNER_SKIP_CERT="false"
 PARTNER_SKIP_FIREWALL="false"
 PARTNER_NON_INTERACTIVE="false"
 PARTNER_NO_LOGS="false"
+PARTNER_BOT_SERVER_IP=""
 
 colorized_echo() {
     local color=$1
@@ -1245,6 +1246,15 @@ is_port_free() {
     return 0
 }
 
+validate_bot_server_ip() {
+    local ip="$1"
+    if [[ ! "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        colorized_echo red "Invalid bot server IP address: ${ip}"
+        colorized_echo yellow "Use the public IPv4 of the bot platform server (e.g. 1.1.1.1)."
+        exit 1
+    fi
+}
+
 configure_partner_firewall() {
     local panel_port="${PARTNER_UVICORN_PORT:-8001}"
 
@@ -1268,6 +1278,8 @@ configure_partner_firewall() {
     ufw allow 443/tcp
     ufw allow 8443/tcp
     ufw allow "${panel_port}/tcp"
+    validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
+    ufw allow from "${PARTNER_BOT_SERVER_IP}" to any port 3306 proto tcp comment 'Bot platform Grafana -> Marzban MySQL'
 
     if ufw status 2>/dev/null | grep -q "Status: active"; then
         colorized_echo green "UFW is already enabled."
@@ -1276,7 +1288,7 @@ configure_partner_firewall() {
         colorized_echo green "UFW enabled."
     fi
 
-    colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, 8443/tcp, ${panel_port}/tcp"
+    colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, 8443/tcp, ${panel_port}/tcp, 3306/tcp from ${PARTNER_BOT_SERVER_IP}"
 }
 
 issue_ssl_certificate() {
@@ -1433,6 +1445,7 @@ require_partner_params() {
     [ -z "$PARTNER_SUBSCRIPTION_TITLE" ] && missing+=("--subscription-title")
     [ -z "$PARTNER_SUPPORT_TELEGRAM" ] && missing+=("--support-telegram")
     [ -z "$PARTNER_BOT_TELEGRAM" ] && missing+=("--bot-telegram")
+    [ -z "$PARTNER_BOT_SERVER_IP" ] && missing+=("--bot-server-ip")
 
     if [ ${#missing[@]} -gt 0 ]; then
         colorized_echo red "Missing required options for non-interactive install: ${missing[*]}"
@@ -1507,6 +1520,12 @@ prompt_partner_install_params() {
         colorized_echo red "Bot Telegram username cannot be empty."
         exit 1
     fi
+
+    if [ -z "$PARTNER_BOT_SERVER_IP" ]; then
+        read -p "Bot platform server public IP (for Grafana MySQL access): " PARTNER_BOT_SERVER_IP
+    fi
+    PARTNER_BOT_SERVER_IP=$(echo "$PARTNER_BOT_SERVER_IP" | tr -d '[:space:]')
+    validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
 }
 
 parse_partner_install_args() {
@@ -1546,6 +1565,10 @@ parse_partner_install_args() {
                 ;;
             --bot-telegram)
                 PARTNER_BOT_TELEGRAM="$2"
+                shift 2
+                ;;
+            --bot-server-ip)
+                PARTNER_BOT_SERVER_IP="$2"
                 shift 2
                 ;;
             --database)
@@ -1610,6 +1633,7 @@ install_partner_command() {
 
     if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
         require_partner_params
+        validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
     else
         prompt_partner_install_params
     fi
