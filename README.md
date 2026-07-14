@@ -38,6 +38,19 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   sudo marzban core-update
   ```
 
+## Миграция legacy-бота на платформу
+
+Скрипты переноса single-tenant бота в multibot-платформу: `migrate_bot/`.
+
+```bash
+cd migrate_bot
+cp migration.env.example migration.env
+chmod 600 migration.env
+# далее шаги 00–11 по README.md в этом каталоге
+```
+
+Подробный runbook: [migrate_bot/README.md](migrate_bot/README.md).
+
 ## Установка партнёрской панели
 
 Автоматическая установка для партнёрского сервера (UFW, certbot, SSL, порт 8001, MySQL, администратор панели).
