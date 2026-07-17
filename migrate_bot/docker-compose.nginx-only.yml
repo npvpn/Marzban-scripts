@@ -1,0 +1,34 @@
+# Minimal compose for source server after migration:
+# only nginx on :80/:443 → partner panel on host :8001.
+#
+# Usage on source (144.31.19.112):
+#   cd /home/MegaSecureBot
+#   docker compose down          # stop old stack
+#   cp /path/to/nginx-megasecure-source.conf etc/nginx/conf/default.conf
+#   docker compose -f docker-compose.nginx-only.yml up -d
+#
+# Partner panel must be running separately:
+#   cd /opt/marzban && marzban up -n
+
+services:
+  nginx:
+    container_name: nginx_n_nvb
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DOMAIN: ${DOMAIN:-app.megasecure.ru}
+    volumes:
+      - ./etc/nginx/conf:/etc/nginx/conf.d:ro
+      - ${CERT_FULLCHAIN_PATH}:/etc/nginx/certs/fullchain.pem:ro
+      - ${CERT_KEY_PATH}:/etc/nginx/certs/privkey.pem:ro
+      - ./certbot/data:/var/www/certbot:ro
+      - ./var/log/nginx:/var/log/nginx
+      - ./volumes/templates/404.html:/usr/share/nginx/html/custom_404.html:ro
+      - ./volumes/templates/50x.html:/usr/share/nginx/html/custom_50x.html:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro

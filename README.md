@@ -38,6 +38,19 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   sudo marzban core-update
   ```
 
+## Миграция legacy-бота на платформу
+
+Скрипты переноса single-tenant бота в multibot-платформу: `migrate_bot/`.
+
+```bash
+cd migrate_bot
+cp migration.env.example migration.env
+chmod 600 migration.env
+# далее шаги 00–11 по README.md в этом каталоге
+```
+
+Подробный runbook: [migrate_bot/README.md](migrate_bot/README.md).
+
 ## Установка партнёрской панели
 
 Автоматическая установка для партнёрского сервера (UFW, certbot, SSL, порт 8001, MySQL, администратор панели).
@@ -63,6 +76,7 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   --support-telegram support_bot \
   --bot-telegram my_vpn_bot \
   --token 'GITHUB_RUNNER_REGISTRATION_TOKEN' \
+  --bot-server-ip 1.1.1.1 \
   --non-interactive
 ```
 
@@ -70,7 +84,9 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 Метка runner = `partner-<bot-telegram>` (например `partner-my_vpn_bot`).  
 Опционально: `--project-dir /opt/marzban` (по умолчанию), `--skip-runner`.
 
-Дополнительные флаги панели: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
+Дополнительные флаги панели: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--bot-server-ip <IPv4>`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
+
+--bot-server-ip` — публичный IP платформы бота. UFW разрешит доступ к MySQL `3306/tcp` только для сервера платформы.
 
 Подробности и установка **только runner** (если панель уже стоит): [Установка панели для партнера.md](./Установка%20панели%20для%20партнера.md).
 
