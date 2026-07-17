@@ -1437,8 +1437,7 @@ partner_runner_label_from_bot() {
 
 run_partner_runner_install() {
     local label
-    # TODO: вернуть на raw/master после merge NPVPN-1625/deploy-partner
-    local script_url="https://github.com/npvpn/Marzban-scripts/raw/NPVPN-1625/deploy-partner/install-partner-runner.sh"
+    local script_url="https://github.com/npvpn/Marzban-scripts/raw/master/install-partner-runner.sh"
     local project_dir="${PARTNER_PROJECT_DIR:-$APP_DIR}"
     local tmp_script
 
