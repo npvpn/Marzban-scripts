@@ -27,6 +27,9 @@ PARTNER_SKIP_CERT="false"
 PARTNER_SKIP_FIREWALL="false"
 PARTNER_NON_INTERACTIVE="false"
 PARTNER_NO_LOGS="false"
+PARTNER_RUNNER_TOKEN=""
+PARTNER_PROJECT_DIR="/opt/marzban"
+PARTNER_SKIP_RUNNER="false"
 PARTNER_BOT_SERVER_IP=""
 
 colorized_echo() {
@@ -1434,6 +1437,69 @@ print_post_install_checklist() {
     colorized_echo blue "====================================="
 }
 
+partner_runner_label_from_bot() {
+    local bot
+    bot=$(normalize_telegram_username "$1")
+    if [ -z "$bot" ]; then
+        echo ""
+        return 0
+    fi
+    echo "partner-${bot}"
+}
+
+run_partner_runner_install() {
+    local label
+    local script_url="https://github.com/npvpn/Marzban-scripts/raw/master/install-partner-runner.sh"
+    local project_dir="${PARTNER_PROJECT_DIR:-$APP_DIR}"
+    local tmp_script
+
+    if [ "$PARTNER_SKIP_RUNNER" = "true" ]; then
+        colorized_echo yellow "Skipping GitHub Actions runner install (--skip-runner)."
+        return 0
+    fi
+
+    if [ -z "$PARTNER_RUNNER_TOKEN" ]; then
+        colorized_echo yellow "Skipping GitHub Actions runner install: --token not provided."
+        colorized_echo cyan "Install later:"
+        label=$(partner_runner_label_from_bot "$PARTNER_BOT_TELEGRAM")
+        echo "  sudo bash -c \"\$(curl -sL ${script_url})\" @ \\"
+        echo "    --token <TOKEN> --label ${label} --project-dir ${project_dir}"
+        return 0
+    fi
+
+    label=$(partner_runner_label_from_bot "$PARTNER_BOT_TELEGRAM")
+    if [ -z "$label" ]; then
+        colorized_echo red "Cannot derive runner label: --bot-telegram is empty."
+        exit 1
+    fi
+
+    colorized_echo blue "Installing GitHub Actions runner (label=${label}, project-dir=${project_dir})"
+
+    # Prefer local script next to marzban.sh when developing / copying the repo.
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/install-partner-runner.sh" ]; then
+        bash "$(dirname "${BASH_SOURCE[0]}")/install-partner-runner.sh" \
+            --token "$PARTNER_RUNNER_TOKEN" \
+            --label "$label" \
+            --project-dir "$project_dir"
+        return $?
+    fi
+
+    tmp_script=$(mktemp)
+    if ! curl -fsSL "$script_url" -o "$tmp_script"; then
+        rm -f "$tmp_script"
+        colorized_echo red "Failed to download install-partner-runner.sh from ${script_url}"
+        exit 1
+    fi
+    chmod +x "$tmp_script"
+    bash "$tmp_script" \
+        --token "$PARTNER_RUNNER_TOKEN" \
+        --label "$label" \
+        --project-dir "$project_dir"
+    local rc=$?
+    rm -f "$tmp_script"
+    return $rc
+}
+
 require_partner_params() {
     local missing=()
 
@@ -1450,6 +1516,11 @@ require_partner_params() {
     if [ ${#missing[@]} -gt 0 ]; then
         colorized_echo red "Missing required options for non-interactive install: ${missing[*]}"
         exit 1
+    fi
+
+    if [ "$PARTNER_SKIP_RUNNER" != "true" ] && [ -z "$PARTNER_RUNNER_TOKEN" ]; then
+        colorized_echo yellow "Warning: --token not set; GitHub Actions runner will be skipped."
+        colorized_echo yellow "Pass --token <registration token> or --skip-runner to silence this."
     fi
 }
 
@@ -1521,6 +1592,15 @@ prompt_partner_install_params() {
         exit 1
     fi
 
+    if [ "$PARTNER_SKIP_RUNNER" != "true" ] && [ -z "$PARTNER_RUNNER_TOKEN" ]; then
+        local derived_label
+        derived_label=$(partner_runner_label_from_bot "$PARTNER_BOT_TELEGRAM")
+        echo
+        colorized_echo cyan "GitHub Actions runner (optional, for Deploy partner panels)."
+        echo "Token: npvpn/telegram_bot → Settings → Actions → Runners → New self-hosted runner (~1h)."
+        echo "Label will be: ${derived_label}"
+        read -p "Runner registration token (empty to skip): " PARTNER_RUNNER_TOKEN
+    fi
     if [ -z "$PARTNER_BOT_SERVER_IP" ]; then
         read -p "Bot platform server public IP (for Grafana MySQL access): " PARTNER_BOT_SERVER_IP
     fi
@@ -1566,6 +1646,18 @@ parse_partner_install_args() {
             --bot-telegram)
                 PARTNER_BOT_TELEGRAM="$2"
                 shift 2
+                ;;
+            --token)
+                PARTNER_RUNNER_TOKEN="$2"
+                shift 2
+                ;;
+            --project-dir)
+                PARTNER_PROJECT_DIR="$2"
+                shift 2
+                ;;
+            --skip-runner)
+                PARTNER_SKIP_RUNNER="true"
+                shift
                 ;;
             --bot-server-ip)
                 PARTNER_BOT_SERVER_IP="$2"
@@ -1715,6 +1807,7 @@ install_partner_command() {
     create_panel_admin "$PARTNER_ADMIN_USERNAME" "$PARTNER_ADMIN_PASSWORD_HASH"
     verify_partner_install "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
     print_post_install_checklist "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
+    run_partner_runner_install
 
     if [ "$PARTNER_NO_LOGS" = "false" ]; then
         colorized_echo yellow "Press Ctrl+C to stop following logs."
@@ -2255,7 +2348,7 @@ usage() {
     colorized_echo yellow "  logs            $(tput sgr0)– Show logs"
     colorized_echo yellow "  cli             $(tput sgr0)– Marzban CLI"
     colorized_echo yellow "  install         $(tput sgr0)– Install Marzban"
-    colorized_echo yellow "  install-partner $(tput sgr0)– Install partner panel (SSL, certbot, admin)"
+    colorized_echo yellow "  install-partner $(tput sgr0)– Install partner panel (SSL, certbot, admin, optional Actions runner)"
     colorized_echo yellow "  update          $(tput sgr0)– Update to latest version"
     colorized_echo yellow "  uninstall       $(tput sgr0)– Uninstall Marzban"
     colorized_echo yellow "  install-script  $(tput sgr0)– Install Marzban script"

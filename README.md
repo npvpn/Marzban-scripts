@@ -75,13 +75,26 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   --subscription-title 'My VPN' \
   --support-telegram support_bot \
   --bot-telegram my_vpn_bot \
+  --token 'GITHUB_RUNNER_REGISTRATION_TOKEN' \
   --bot-server-ip 1.1.1.1 \
   --non-interactive
 ```
 
-Дополнительные флаги: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--bot-server-ip <IPv4>`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
+`--token` — registration token self-hosted runner (репа `npvpn/telegram_bot`, ~1 час).  
+Метка runner = `partner-<bot-telegram>` (например `partner-my_vpn_bot`).  
+Опционально: `--project-dir /opt/marzban` (по умолчанию), `--skip-runner`.
 
-`--bot-server-ip` — публичный IP платформы бота. UFW разрешит доступ к MySQL `3306/tcp` только для сервера платформы.
+Дополнительные флаги панели: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--bot-server-ip <IPv4>`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
+
+--bot-server-ip` — публичный IP платформы бота. UFW разрешит доступ к MySQL `3306/tcp` только для сервера платформы.
+
+Подробности и установка **только runner** (если панель уже стоит): [Установка панели для партнера.md](./Установка%20панели%20для%20партнера.md).
+
+```bash
+sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/install-partner-runner.sh)" @ \
+  --token 'GITHUB_RUNNER_REGISTRATION_TOKEN' \
+  --label partner-my_vpn_bot
+```
 
 
 ## Установка Marzban-node
