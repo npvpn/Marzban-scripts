@@ -26,7 +26,9 @@ NODES_FILE="${1:-$SCRIPT_DIR/nodes.txt}"
 PARALLEL="${2:-20}"
 BOT_SERVER_IP="${3:-${BOT_SERVER_IP:-}}"
 LOG_DIR="$SCRIPT_DIR/migrate-logs"
-SCRIPT_URL="${MARZBAN_NODE_SCRIPT_URL:-https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh}"
+# TODO: вернуть raw/master после мержа NPVPN-1649/node_exporter
+MARZBAN_SCRIPTS_REF="${MARZBAN_SCRIPTS_REF:-NPVPN-1649/node_exporter}"
+SCRIPT_URL="${MARZBAN_NODE_SCRIPT_URL:-https://github.com/npvpn/Marzban-scripts/raw/${MARZBAN_SCRIPTS_REF}/marzban-node.sh}"
 
 if [[ ! -f "$NODES_FILE" ]]; then
     echo "Файл не найден: $NODES_FILE"

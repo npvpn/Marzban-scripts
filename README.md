@@ -98,25 +98,28 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/ins
 
 
 ## Установка Marzban-node
+
+> **Тестовая ветка:** `NPVPN-1649/node_exporter` (node_exporter). После мержа в `master` замените `NPVPN-1649/node_exporter` → `master` в командах ниже.
+
 Установить Marzban-node на сервер:
 ```bash
-sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install
+sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/NPVPN-1649/node_exporter/marzban-node.sh)" @ install
 ```
 Установить Marzban-node на сервер с кастомным именем:
 ```bash
-sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install --name marzban-node2
+sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/NPVPN-1649/node_exporter/marzban-node.sh)" @ install --name marzban-node2
 ```
 Вместе с нодой ставится **node_exporter** (`:9100`, host network) для Prometheus на боте. IP бота можно передать сразу — тогда `:9100` откроется только ему (nftables, без включения UFW):
 
 ```bash
-sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install --bot-server-ip 1.2.3.4
+sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/NPVPN-1649/node_exporter/marzban-node.sh)" @ install --bot-server-ip 1.2.3.4
 ```
 
 Без флага скрипт спросит IP интерактивно; пустой ввод — exporter поднимется, порт останется публичным. `--skip-firewall` пропускает ограничение порта.
 
 Или можно установить только сам скрипт (`marzban-node` команда) на сервер:
 ```bash
-sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install-script
+sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/NPVPN-1649/node_exporter/marzban-node.sh)" @ install-script
 ```
 
 Для просмотра всех команд используйте `help`:
@@ -131,10 +134,10 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 - **Мигрировать существующую ноду** (Watchtower, conntrack, node_exporter):
 
   ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ migrate --bot-server-ip 1.2.3.4
+  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/NPVPN-1649/node_exporter/marzban-node.sh)" @ migrate --bot-server-ip 1.2.3.4
   ```
 
-  То же на одной уже установленной ноде через CLI:
+  То же на одной уже установленной ноде через CLI (если `marzban-node` уже с этой ветки):
 
   ```bash
   sudo marzban-node migrate --bot-server-ip 1.2.3.4
@@ -147,7 +150,7 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   ./migrate_nodes.sh nodes.txt 20 1.2.3.4
   ```
 
-  Третий аргумент — публичный IPv4 сервера бота (Prometheus).
+  Третий аргумент — публичный IPv4 сервера бота (Prometheus). Скрипт по умолчанию тянет `marzban-node.sh` с ветки `NPVPN-1649/node_exporter`.
 
 ## Блокировщик ASN для жалоб по ноде
 
