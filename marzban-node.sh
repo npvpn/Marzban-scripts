@@ -72,9 +72,7 @@ COMPOSE_FILE="$APP_DIR/docker-compose.yml"
 LAST_XRAY_CORES=5
 CERT_FILE="$DATA_DIR/cert.pem"
 FETCH_REPO="npvpn/Marzban-scripts"
-# TODO: вернуть raw/master после мержа NPVPN-1649/node_exporter
-MARZBAN_SCRIPTS_REF="${MARZBAN_SCRIPTS_REF:-NPVPN-1649/node_exporter}"
-SCRIPT_URL="https://github.com/$FETCH_REPO/raw/${MARZBAN_SCRIPTS_REF}/marzban-node.sh"
+SCRIPT_URL="https://github.com/$FETCH_REPO/raw/master/marzban-node.sh"
 
 # Prometheus on the bot platform scrapes node_exporter at :9100.
 # BOT_SERVER_IP can also be passed via environment.
