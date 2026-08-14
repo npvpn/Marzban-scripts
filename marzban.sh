@@ -769,7 +769,7 @@ install_marzban() {
     local marzban_version=$1
     local database_type=$2
     # Fetch releases
-    FILES_URL_PREFIX="https://raw.githubusercontent.com/npvpn/panel/master"
+    FILES_URL_PREFIX="https://raw.githubusercontent.com/npvpn/vpn-panel/master"
     local mysql_bind_address
     local marzban_ssl_volumes
     mysql_bind_address=$(get_mysql_bind_address)
@@ -1765,7 +1765,7 @@ install_partner_command() {
 
     check_version_exists() {
         local version=$1
-        local repo_url="https://api.github.com/repos/npvpn/panel/releases"
+        local repo_url="https://api.github.com/repos/npvpn/vpn-panel/releases"
         if [ "$version" == "latest" ] || [ "$version" == "dev" ]; then
             return 0
         fi
@@ -1883,7 +1883,7 @@ install_command() {
     # Function to check if a version exists in the GitHub releases
     check_version_exists() {
         local version=$1
-        repo_url="https://api.github.com/repos/npvpn/panel/releases"
+        repo_url="https://api.github.com/repos/npvpn/vpn-panel/releases"
         if [ "$version" == "latest" ] || [ "$version" == "dev" ]; then
             return 0
         fi
