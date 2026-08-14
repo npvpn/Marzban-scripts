@@ -106,6 +106,14 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install --name marzban-node2
 ```
+Вместе с нодой ставится **node_exporter** (`:9100`, host network) для Prometheus на боте. IP бота можно передать сразу — тогда `:9100` откроется только ему (nftables, без включения UFW):
+
+```bash
+sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install --bot-server-ip 1.2.3.4
+```
+
+Без флага скрипт спросит IP интерактивно; пустой ввод — exporter поднимется, порт останется публичным. `--skip-firewall` пропускает ограничение порта.
+
 Или можно установить только сам скрипт (`marzban-node` команда) на сервер:
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ install-script
@@ -120,11 +128,26 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   sudo marzban-node core-update
   ```
 
-- **Мигрировать существующую ноду на автообновления через Watchtower**:
+- **Мигрировать существующую ноду** (Watchtower, conntrack, node_exporter):
 
   ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ migrate
+  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ migrate --bot-server-ip 1.2.3.4
   ```
+
+  То же на одной уже установленной ноде через CLI:
+
+  ```bash
+  sudo marzban-node migrate --bot-server-ip 1.2.3.4
+  # или: sudo marzban-node update --bot-server-ip 1.2.3.4
+  ```
+
+- **Парк нод** (`migrate_nodes.sh`, SSH как root по ключу, IP в `nodes.txt`):
+
+  ```bash
+  ./migrate_nodes.sh nodes.txt 20 1.2.3.4
+  ```
+
+  Третий аргумент — публичный IPv4 сервера бота (Prometheus).
 
 ## Блокировщик ASN для жалоб по ноде
 
