@@ -32,6 +32,11 @@ PARTNER_PROJECT_DIR="/opt/marzban"
 PARTNER_SKIP_RUNNER="false"
 PARTNER_BOT_SERVER_IP=""
 
+# SSL context (set by install for mysql/mariadb, and by install-partner)
+SSL_DOMAIN=""
+SSL_CERT_EMAIL=""
+SSL_UVICORN_PORT="8001"
+
 colorized_echo() {
     local color=$1
     local text=$2
@@ -736,15 +741,15 @@ get_mysql_bind_address() {
 }
 
 get_marzban_ssl_volume_lines() {
-    if [ "$PARTNER_MODE" = "true" ] && [ -n "$PARTNER_DOMAIN" ]; then
+    if [ -n "$SSL_DOMAIN" ]; then
         cat <<EOF
-      - /etc/letsencrypt/live/${PARTNER_DOMAIN}/fullchain.pem:/etc/letsencrypt/live/${PARTNER_DOMAIN}/fullchain.pem:ro
-      - /etc/letsencrypt/live/${PARTNER_DOMAIN}/privkey.pem:/etc/letsencrypt/live/${PARTNER_DOMAIN}/privkey.pem:ro
+      - /etc/letsencrypt/live/${SSL_DOMAIN}/fullchain.pem:/etc/letsencrypt/live/${SSL_DOMAIN}/fullchain.pem:ro
+      - /etc/letsencrypt/live/${SSL_DOMAIN}/privkey.pem:/etc/letsencrypt/live/${SSL_DOMAIN}/privkey.pem:ro
 EOF
     fi
 }
 
-configure_partner_ssl_env() {
+configure_ssl_env() {
     local domain=$1
     local port=$2
     local cert_dir="/etc/letsencrypt/live/${domain}"
@@ -753,16 +758,17 @@ configure_partner_ssl_env() {
     sed -i '/^UVICORN_SSL_CERTFILE[[:space:]]*=/d' "$ENV_FILE"
     sed -i '/^UVICORN_SSL_KEYFILE[[:space:]]*=/d' "$ENV_FILE"
     sed -i '/^# Partner SSL configuration/d' "$ENV_FILE"
+    sed -i '/^# SSL configuration/d' "$ENV_FILE"
 
     {
         echo ""
-        echo "# Partner SSL configuration"
+        echo "# SSL configuration"
         echo "UVICORN_PORT = ${port}"
         echo "UVICORN_SSL_CERTFILE = \"${cert_dir}/fullchain.pem\""
         echo "UVICORN_SSL_KEYFILE = \"${cert_dir}/privkey.pem\""
     } >> "$ENV_FILE"
 
-    colorized_echo green "Partner SSL settings saved in $ENV_FILE"
+    colorized_echo green "SSL settings saved in $ENV_FILE"
 }
 
 install_marzban() {
@@ -873,8 +879,8 @@ EOF
         
         colorized_echo green "File saved in $APP_DIR/.env"
 
-        if [ "$PARTNER_MODE" = "true" ]; then
-            configure_partner_ssl_env "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
+        if [ -n "$SSL_DOMAIN" ]; then
+            configure_ssl_env "$SSL_DOMAIN" "${SSL_UVICORN_PORT:-8001}"
         fi
 
     elif [ "$database_type" == "mysql" ]; then
@@ -969,8 +975,8 @@ EOF
         
         colorized_echo green "File saved in $APP_DIR/.env"
 
-        if [ "$PARTNER_MODE" = "true" ]; then
-            configure_partner_ssl_env "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
+        if [ -n "$SSL_DOMAIN" ]; then
+            configure_ssl_env "$SSL_DOMAIN" "${SSL_UVICORN_PORT:-8001}"
         fi
 
     else
@@ -1065,6 +1071,13 @@ prompt_for_marzban_password() {
         return
     fi
 
+    if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+        MYSQL_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+        colorized_echo green "A secure password has been generated automatically."
+        colorized_echo green "This password will be recorded in the .env file for future use."
+        return
+    fi
+
     colorized_echo cyan "This password will be used to access the database and should be strong."
     colorized_echo cyan "If you do not enter a custom password, a secure 20-character password will be generated automatically."
 
@@ -1109,8 +1122,7 @@ configure_subscription_settings() {
     if [ -n "$PARTNER_SUPPORT_TELEGRAM" ]; then
         support_username=$(normalize_telegram_username "$PARTNER_SUPPORT_TELEGRAM")
     elif [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
-        colorized_echo red "Support telegram username is required in non-interactive mode."
-        exit 1
+        support_username=""
     else
         echo "Подсказка: вводите только username без https://t.me/ (допустимо с @ — уберём)."
         printf "Ссылка поддержки — username без https://t.me/ (можно с @): "
@@ -1121,8 +1133,7 @@ configure_subscription_settings() {
     if [ -n "$PARTNER_SUBSCRIPTION_TITLE" ]; then
         profile_title="$PARTNER_SUBSCRIPTION_TITLE"
     elif [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
-        colorized_echo red "Subscription title is required in non-interactive mode."
-        exit 1
+        profile_title="Subscription"
     else
         printf "Название подписки в клиенте (по умолчанию: Subscription): "
         read profile_title
@@ -1135,8 +1146,7 @@ configure_subscription_settings() {
     if [ -n "$PARTNER_BOT_TELEGRAM" ]; then
         bot_username=$(normalize_telegram_username "$PARTNER_BOT_TELEGRAM")
     elif [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
-        colorized_echo red "Bot telegram username is required in non-interactive mode."
-        exit 1
+        bot_username=""
     else
         printf "Ссылка на бота — username без https://t.me/ (можно с @): "
         read bot_username
@@ -1314,7 +1324,7 @@ issue_ssl_certificate() {
     fi
 
     if [[ "$OS" != "Ubuntu"* ]] && [[ "$OS" != "Debian"* ]]; then
-        colorized_echo red "Partner install certificate issuance is currently supported only on Debian/Ubuntu."
+        colorized_echo red "Certificate issuance is currently supported only on Debian/Ubuntu."
         exit 1
     fi
 
@@ -1732,6 +1742,9 @@ install_partner_command() {
 
     PARTNER_DOMAIN=$(normalize_domain "$PARTNER_DOMAIN")
     PARTNER_MODE="true"
+    SSL_DOMAIN="$PARTNER_DOMAIN"
+    SSL_CERT_EMAIL="$PARTNER_CERT_EMAIL"
+    SSL_UVICORN_PORT="$PARTNER_UVICORN_PORT"
     MYSQL_PASSWORD="$PARTNER_MYSQL_PASSWORD"
 
     if is_marzban_installed; then
@@ -1815,6 +1828,37 @@ install_partner_command() {
     fi
 }
 
+require_ssl_install_params() {
+    local missing=()
+
+    [ -z "$SSL_DOMAIN" ] && missing+=("--domain")
+    [ -z "$SSL_CERT_EMAIL" ] && missing+=("--cert-email")
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        colorized_echo red "Missing required options for non-interactive install: ${missing[*]}"
+        exit 1
+    fi
+}
+
+prompt_ssl_install_params() {
+    if [ -z "$SSL_DOMAIN" ]; then
+        read -p "Domain for the panel (e.g. panel.example.com): " SSL_DOMAIN
+    fi
+    SSL_DOMAIN=$(normalize_domain "$SSL_DOMAIN")
+    if [ -z "$SSL_DOMAIN" ]; then
+        colorized_echo red "Domain cannot be empty."
+        exit 1
+    fi
+
+    if [ -z "$SSL_CERT_EMAIL" ]; then
+        read -p "Email for Let's Encrypt certificates: " SSL_CERT_EMAIL
+    fi
+    if [ -z "$SSL_CERT_EMAIL" ]; then
+        colorized_echo red "Certificate email cannot be empty."
+        exit 1
+    fi
+}
+
 install_command() {
     check_running_as_root
 
@@ -1849,16 +1893,62 @@ install_command() {
                 marzban_version_set="true"
                 shift 2
             ;;
+            --domain)
+                SSL_DOMAIN=$(normalize_domain "$2")
+                shift 2
+            ;;
+            --cert-email)
+                SSL_CERT_EMAIL="$2"
+                shift 2
+            ;;
+            --uvicorn-port)
+                SSL_UVICORN_PORT="$2"
+                shift 2
+            ;;
+            --skip-dns-check)
+                PARTNER_SKIP_DNS_CHECK="true"
+                shift
+            ;;
+            --skip-cert)
+                PARTNER_SKIP_CERT="true"
+                shift
+            ;;
+            --non-interactive|-y)
+                PARTNER_NON_INTERACTIVE="true"
+                shift
+            ;;
+            --no-logs)
+                PARTNER_NO_LOGS="true"
+                shift
+            ;;
             *)
-                echo "Unknown option: $1"
+                colorized_echo red "Unknown option: $1"
                 exit 1
             ;;
         esac
     done
 
+    if [[ "$database_type" != "mysql" && "$database_type" != "mariadb" ]]; then
+        if [ -n "$SSL_DOMAIN" ] || [ -n "$SSL_CERT_EMAIL" ]; then
+            colorized_echo red "SSL options (--domain, --cert-email) are only supported with --database mysql or --database mariadb."
+            exit 1
+        fi
+    else
+        if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+            require_ssl_install_params
+        else
+            prompt_ssl_install_params
+        fi
+        SSL_DOMAIN=$(normalize_domain "$SSL_DOMAIN")
+    fi
+
     # Check if marzban is already installed
     if is_marzban_installed; then
         colorized_echo red "Marzban is already installed at $APP_DIR"
+        if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+            colorized_echo red "Aborting: panel already installed. Remove it first or run without --non-interactive."
+            exit 1
+        fi
         read -p "Do you want to override the previous installation? (y/n) "
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             colorized_echo red "Aborted installation"
@@ -1880,6 +1970,12 @@ install_command() {
     fi
     detect_compose
     install_marzban_script
+
+    if [[ "$database_type" == "mysql" || "$database_type" == "mariadb" ]]; then
+        check_domain_dns "$SSL_DOMAIN"
+        issue_ssl_certificate "$SSL_DOMAIN" "$SSL_CERT_EMAIL"
+    fi
+
     # Function to check if a version exists in the GitHub releases
     check_version_exists() {
         local version=$1
@@ -1912,7 +2008,15 @@ install_command() {
         exit 1
     fi
     up_marzban
-    follow_marzban_logs
+
+    if [ -n "$SSL_DOMAIN" ]; then
+        colorized_echo green "Panel URL: https://${SSL_DOMAIN}:${SSL_UVICORN_PORT}/dashboard/"
+        colorized_echo cyan "Create an admin: marzban cli admin create"
+    fi
+
+    if [ "$PARTNER_NO_LOGS" = "false" ]; then
+        follow_marzban_logs
+    fi
 }
 
 install_yq() {
@@ -2347,7 +2451,7 @@ usage() {
     colorized_echo yellow "  status          $(tput sgr0)– Show status"
     colorized_echo yellow "  logs            $(tput sgr0)– Show logs"
     colorized_echo yellow "  cli             $(tput sgr0)– Marzban CLI"
-    colorized_echo yellow "  install         $(tput sgr0)– Install Marzban"
+    colorized_echo yellow "  install         $(tput sgr0)– Install Marzban (MySQL/MariaDB: SSL, certbot, port 8001)"
     colorized_echo yellow "  install-partner $(tput sgr0)– Install partner panel (SSL, certbot, admin, optional Actions runner)"
     colorized_echo yellow "  update          $(tput sgr0)– Update to latest version"
     colorized_echo yellow "  uninstall       $(tput sgr0)– Uninstall Marzban"
