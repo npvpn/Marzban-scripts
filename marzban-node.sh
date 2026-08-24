@@ -20,6 +20,19 @@ while [[ $# -gt 0 ]]; do
             fi
             shift # past value
         ;;
+        --bot-server-ip)
+            if [[ -z "${2:-}" || "$2" == -* ]]; then
+                echo "Error: --bot-server-ip requires an IPv4 address."
+                exit 1
+            fi
+            BOT_SERVER_IP="$2"
+            shift # past argument
+            shift # past value
+        ;;
+        --skip-firewall)
+            SKIP_NODE_EXPORTER_FIREWALL="true"
+            shift
+        ;;
         *)
             shift # past unknown argument
         ;;
@@ -60,6 +73,16 @@ LAST_XRAY_CORES=5
 CERT_FILE="$DATA_DIR/cert.pem"
 FETCH_REPO="npvpn/Marzban-scripts"
 SCRIPT_URL="https://github.com/$FETCH_REPO/raw/master/marzban-node.sh"
+
+# Prometheus on the bot platform scrapes node_exporter at :9100.
+# BOT_SERVER_IP can also be passed via environment.
+BOT_SERVER_IP="${BOT_SERVER_IP:-}"
+SKIP_NODE_EXPORTER_FIREWALL="${SKIP_NODE_EXPORTER_FIREWALL:-false}"
+NODE_EXPORTER_IMAGE="prom/node-exporter:v1.11.1"
+NODE_EXPORTER_PORT="9100"
+NODE_EXPORTER_NFT_TABLE="node_exporter"
+NODE_EXPORTER_NFT_FILE="/etc/nftables.d/node-exporter.nft"
+NODE_EXPORTER_FW_UNIT="/etc/systemd/system/node-exporter-fw.service"
 
 colorized_echo() {
     local color=$1
@@ -242,6 +265,150 @@ EOF
     colorized_echo green "nf_conntrack limits applied (/etc/sysctl.d/99-vpn.conf)."
 }
 
+validate_ipv4() {
+    local ip="$1"
+    if [[ ! "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        colorized_echo red "Invalid IPv4 address: ${ip}"
+        colorized_echo yellow "Use the public IPv4 of the bot/Prometheus server (e.g. 1.1.1.1)."
+        return 1
+    fi
+    return 0
+}
+
+prompt_bot_server_ip() {
+    if [ -n "$BOT_SERVER_IP" ] || [ "$SKIP_NODE_EXPORTER_FIREWALL" = "true" ]; then
+        return 0
+    fi
+    while true; do
+        read -p "Enter bot/Prometheus server IPv4 to allow on :${NODE_EXPORTER_PORT} (empty to skip firewall): " -r BOT_SERVER_IP
+        BOT_SERVER_IP="${BOT_SERVER_IP//[[:space:]]/}"
+        if [ -z "$BOT_SERVER_IP" ]; then
+            colorized_echo yellow "No bot IP given; node_exporter :${NODE_EXPORTER_PORT} will be reachable from any host."
+            return 0
+        fi
+        if validate_ipv4 "$BOT_SERVER_IP"; then
+            return 0
+        fi
+        BOT_SERVER_IP=""
+    done
+}
+
+# Idempotent: (re)write the node_exporter service in docker-compose.yml.
+# Host network so Prometheus on the bot can scrape NODE_IP:9100.
+ensure_node_exporter_service() {
+    colorized_echo blue "Ensuring node_exporter in $COMPOSE_FILE"
+
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        colorized_echo red "Compose file not found at $COMPOSE_FILE"
+        exit 1
+    fi
+
+    if ! command -v yq >/dev/null 2>&1; then
+        install_yq
+    fi
+
+    yq eval ".services.node_exporter.image = \"${NODE_EXPORTER_IMAGE}\"" -i "$COMPOSE_FILE"
+    yq eval '.services.node_exporter.container_name = "node_exporter"' -i "$COMPOSE_FILE"
+    yq eval '.services.node_exporter.restart = "always"' -i "$COMPOSE_FILE"
+    yq eval '.services.node_exporter.pid = "host"' -i "$COMPOSE_FILE"
+    yq eval '.services.node_exporter.network_mode = "host"' -i "$COMPOSE_FILE"
+    yq eval '.services.node_exporter.volumes = ["/:/host:ro,rslave"]' -i "$COMPOSE_FILE"
+    # $$ is docker-compose escaping so the container sees a single $
+    yq eval '.services.node_exporter.command = ["--path.rootfs=/host","--web.listen-address=:9100","--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker/.+)($$|/)"]' -i "$COMPOSE_FILE"
+
+    colorized_echo green "node_exporter configured (image ${NODE_EXPORTER_IMAGE}, port ${NODE_EXPORTER_PORT}/tcp)."
+}
+
+remove_node_exporter_firewall() {
+    if command -v nft >/dev/null 2>&1; then
+        nft delete table inet "$NODE_EXPORTER_NFT_TABLE" 2>/dev/null || true
+    fi
+    rm -f "$NODE_EXPORTER_NFT_FILE"
+    if [ -f "$NODE_EXPORTER_FW_UNIT" ]; then
+        systemctl disable --now node-exporter-fw.service >/dev/null 2>&1 || true
+        rm -f "$NODE_EXPORTER_FW_UNIT"
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+}
+
+# Restrict :9100 to the bot/Prometheus IP only.
+# Dedicated nftables table — does NOT enable UFW (that would break dynamic Xray ports).
+configure_node_exporter_firewall() {
+    if [ "$SKIP_NODE_EXPORTER_FIREWALL" = "true" ]; then
+        colorized_echo yellow "Skipping node_exporter firewall; port ${NODE_EXPORTER_PORT} may be public."
+        return 0
+    fi
+
+    if [ -z "$BOT_SERVER_IP" ]; then
+        colorized_echo yellow "Bot server IP not set; node_exporter :${NODE_EXPORTER_PORT} is reachable from any host."
+        colorized_echo yellow "Re-run with --bot-server-ip <IPv4> to allow only the bot/Prometheus server."
+        return 0
+    fi
+
+    if ! validate_ipv4 "$BOT_SERVER_IP"; then
+        exit 1
+    fi
+
+    if [ -z "${OS:-}" ]; then
+        detect_os
+    fi
+
+    if ! command -v nft >/dev/null 2>&1; then
+        install_package nftables
+    fi
+
+    if ! command -v nft >/dev/null 2>&1; then
+        colorized_echo red "nftables is not available; cannot restrict :${NODE_EXPORTER_PORT}."
+        exit 1
+    fi
+
+    colorized_echo blue "Restricting node_exporter :${NODE_EXPORTER_PORT} to ${BOT_SERVER_IP}"
+
+    mkdir -p "$(dirname "$NODE_EXPORTER_NFT_FILE")"
+    cat > "$NODE_EXPORTER_NFT_FILE" <<EOF
+table inet ${NODE_EXPORTER_NFT_TABLE} {
+    chain input {
+        type filter hook input priority -10; policy accept;
+        iifname "lo" tcp dport ${NODE_EXPORTER_PORT} accept
+        tcp dport ${NODE_EXPORTER_PORT} ip saddr ${BOT_SERVER_IP} accept
+        tcp dport ${NODE_EXPORTER_PORT} drop
+    }
+}
+EOF
+
+    local nft_bin
+    nft_bin="$(command -v nft)"
+
+    nft delete table inet "$NODE_EXPORTER_NFT_TABLE" 2>/dev/null || true
+    nft -f "$NODE_EXPORTER_NFT_FILE"
+
+    cat > "$NODE_EXPORTER_FW_UNIT" <<EOF
+[Unit]
+Description=Restrict node_exporter :${NODE_EXPORTER_PORT} to bot/Prometheus IP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-${nft_bin} delete table inet ${NODE_EXPORTER_NFT_TABLE}
+ExecStart=${nft_bin} -f ${NODE_EXPORTER_NFT_FILE}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now node-exporter-fw.service
+
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow from "$BOT_SERVER_IP" to any port "$NODE_EXPORTER_PORT" proto tcp comment 'Prometheus -> node_exporter' >/dev/null
+        colorized_echo green "UFW already active: allowed ${BOT_SERVER_IP} -> ${NODE_EXPORTER_PORT}/tcp."
+    fi
+
+    colorized_echo green "node_exporter :${NODE_EXPORTER_PORT} allowed only from ${BOT_SERVER_IP} (nftables table ${NODE_EXPORTER_NFT_TABLE})."
+}
+
 install_marzban_node() {
     # Fetch releases
     mkdir -p "$DATA_DIR"
@@ -316,6 +483,8 @@ install_marzban_node() {
             colorized_echo red "Invalid port. Please enter a port between 1 and 65535."
         fi
     done
+
+    prompt_bot_server_ip
     
     colorized_echo blue "Generating compose file"
 
@@ -374,6 +543,8 @@ EOL
     else
         colorized_echo yellow "Could not detect host Docker API version; leaving watchtower to negotiate."
     fi
+
+    ensure_node_exporter_service
 
     colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
 }
@@ -480,9 +651,11 @@ install_command() {
     install_marzban_node_script
     install_marzban_node
     tune_conntrack_limits
+    configure_node_exporter_firewall
     up_marzban_node
     follow_marzban_node_logs
     echo "Use your IP: $NODE_IP and defaults ports: $SERVICE_PORT and $XRAY_API_PORT to setup your Marzban Main Panel"
+    echo "node_exporter: ${NODE_IP}:${NODE_EXPORTER_PORT} (Prometheus scrape from bot server)"
 }
 
 uninstall_command() {
@@ -503,6 +676,7 @@ uninstall_command() {
     if is_marzban_node_up; then
         down_marzban_node
     fi
+    remove_node_exporter_firewall
     uninstall_marzban_node_script
     uninstall_marzban_node
     uninstall_marzban_node_docker_images
@@ -715,6 +889,8 @@ update_command() {
     detect_compose
     
     update_marzban_node_script
+    ensure_node_exporter_service
+    configure_node_exporter_firewall
     colorized_echo blue "Pulling latest version"
     update_marzban_node
     
@@ -1059,6 +1235,7 @@ migrate_command() {
 
     colorized_echo blue "Migrating to auto-update setup..."
 
+    update_marzban_node_script
     tune_conntrack_limits
 
     # Change image to npvpn/node:stable (production channel; :latest is reserved for tests)
@@ -1091,6 +1268,9 @@ migrate_command() {
         colorized_echo yellow "Could not detect host Docker API version; leaving watchtower to negotiate."
     fi
 
+    ensure_node_exporter_service
+    configure_node_exporter_firewall
+
     colorized_echo blue "Pulling latest images..."
     $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" pull
 
@@ -1099,6 +1279,7 @@ migrate_command() {
     $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d --remove-orphans
 
     colorized_echo green "Migration complete! Watchtower will now auto-update the node."
+    colorized_echo green "node_exporter listens on ${NODE_IP}:${NODE_EXPORTER_PORT}."
 }
 
 
@@ -1108,6 +1289,7 @@ usage() {
     colorized_echo blue "================================"
     colorized_echo cyan "Usage:"
     echo "  $APP_NAME [command]"
+    echo "  $APP_NAME install|migrate|update --bot-server-ip <IPv4>"
     echo
 
     colorized_echo cyan "Commands:"
@@ -1116,15 +1298,20 @@ usage() {
     colorized_echo yellow "  restart         $(tput sgr0)– Restart services"
     colorized_echo yellow "  status          $(tput sgr0)– Show status"
     colorized_echo yellow "  logs            $(tput sgr0)– Show logs"
-    colorized_echo yellow "  install         $(tput sgr0)– Install/reinstall Marzban-node"
-    colorized_echo yellow "  update          $(tput sgr0)– Update to latest version"
+    colorized_echo yellow "  install         $(tput sgr0)– Install/reinstall Marzban-node + node_exporter"
+    colorized_echo yellow "  update          $(tput sgr0)– Update to latest version (also adds node_exporter if missing)"
     colorized_echo yellow "  uninstall       $(tput sgr0)– Uninstall Marzban-node"
     colorized_echo yellow "  install-script  $(tput sgr0)– Install Marzban-node script"
     colorized_echo yellow "  uninstall-script  $(tput sgr0)– Uninstall Marzban-node script"
     colorized_echo yellow "  edit            $(tput sgr0)– Edit docker-compose.yml (via nano or vi)"
     colorized_echo yellow "  core-update     $(tput sgr0)– Update/Change Xray core"
-    colorized_echo yellow "  migrate         $(tput sgr0)– Add Watchtower for auto-updates"
+    colorized_echo yellow "  migrate         $(tput sgr0)– Add Watchtower, node_exporter, conntrack limits"
     colorized_echo yellow "  tune-conntrack  $(tput sgr0)– Raise nf_conntrack limits for VPN traffic"
+
+    echo
+    colorized_echo cyan "Options:"
+    colorized_echo yellow "  --bot-server-ip <IPv4>  $(tput sgr0)– allow Prometheus on this IP to scrape :${NODE_EXPORTER_PORT}"
+    colorized_echo yellow "  --skip-firewall         $(tput sgr0)– do not restrict :${NODE_EXPORTER_PORT}"
     
     echo
     colorized_echo cyan "Node Information:"
@@ -1149,6 +1336,7 @@ usage() {
     colorized_echo cyan "Ports:"
     colorized_echo magenta "  Service port: $SERVICE_PORT"
     colorized_echo magenta "  API port: $XRAY_API_PORT"
+    colorized_echo magenta "  node_exporter: $NODE_EXPORTER_PORT"
     colorized_echo blue "================================="
     echo
 }

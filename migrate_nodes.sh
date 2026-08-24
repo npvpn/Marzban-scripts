@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Параллельная миграция нод через официальный marzban-node.sh.
-# migrate подключает watchtower (авто-обновление ноды) и поднимает лимиты nf_conntrack.
+# migrate подключает watchtower (авто-обновление ноды), поднимает лимиты
+# nf_conntrack, ставит node_exporter и открывает :9100 только для IP бота
+# (Prometheus на платформе).
 #
 # IP-адреса берутся из файла (по одному на строку).
 # Логи по каждой ноде складываются в ./migrate-logs/<ip>.log.
@@ -10,16 +12,21 @@
 # На всех нодах должен быть добавлен SSH-ключ от машины, с которой запускается скрипт.
 #
 # Использование:
-#   ./migrate_nodes.sh                           # nodes.txt в той же папке, 20 параллельно
-#   ./migrate_nodes.sh /path/to/nodes.txt        # явный путь
-#   ./migrate_nodes.sh nodes.txt 50              # 50 параллельных подключений
+#   ./migrate_nodes.sh nodes.txt 20 1.2.3.4          # файл, параллельность, IP бота
+#   BOT_SERVER_IP=1.2.3.4 ./migrate_nodes.sh         # nodes.txt, 20 параллельно
+#   ./migrate_nodes.sh /path/to/nodes.txt 50 1.2.3.4
+#
+# Третий аргумент / BOT_SERVER_IP — публичный IPv4 сервера бота (Prometheus).
+# Обязателен: :9100 открывается только для этого IP.
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NODES_FILE="${1:-$SCRIPT_DIR/nodes.txt}"
 PARALLEL="${2:-20}"
+BOT_SERVER_IP="${3:-${BOT_SERVER_IP:-}}"
 LOG_DIR="$SCRIPT_DIR/migrate-logs"
+SCRIPT_URL="${MARZBAN_NODE_SCRIPT_URL:-https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh}"
 
 if [[ ! -f "$NODES_FILE" ]]; then
     echo "Файл не найден: $NODES_FILE"
@@ -27,9 +34,21 @@ if [[ ! -f "$NODES_FILE" ]]; then
     exit 1
 fi
 
+if [[ -z "$BOT_SERVER_IP" ]]; then
+    echo "Нужен публичный IPv4 сервера бота/Prometheus (чтобы открыть :9100 только ему)."
+    echo "  ./migrate_nodes.sh nodes.txt 20 1.2.3.4"
+    echo "или BOT_SERVER_IP=1.2.3.4 ./migrate_nodes.sh"
+    exit 1
+fi
+
+if [[ ! "$BOT_SERVER_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "Некорректный IPv4 бота: $BOT_SERVER_IP"
+    exit 1
+fi
+
 mkdir -p "$LOG_DIR"
 
-REMOTE_CMD='bash -c "$(curl -fsSL https://github.com/npvpn/Marzban-scripts/raw/master/marzban-node.sh)" @ migrate'
+REMOTE_CMD="bash -c \"\$(curl -fsSL ${SCRIPT_URL})\" @ migrate --bot-server-ip ${BOT_SERVER_IP}"
 
 run_one() {
     local ip="$1"
