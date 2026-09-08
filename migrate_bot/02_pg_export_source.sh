@@ -70,6 +70,9 @@ SQL
 echo "Copying source env files without printing contents"
 run_ssh "$SOURCE_REF" "cd '$SOURCE_PATH' && tar -czf - .env .env.marzban 2>/dev/null || true" > "$OUT_DIR/source_env_files.tgz"
 
+echo "Copying source message images (src/files → ${TARGET_BOT_ID}__* on import)"
+fetch_source_files_tgz "$OUT_DIR/source_files.tgz" "$OUT_DIR/source_files_list.txt"
+
 sha256sum "$OUT_DIR"/*.csv > "$OUT_DIR/SHA256SUMS"
 echo "PG source export complete: $OUT_DIR"
 

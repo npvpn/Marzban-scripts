@@ -51,7 +51,7 @@
 Шаги **нельзя** свести в один безусловный `for`, потому что:
 
 - между `08` и `09` нужно **обновить `PANEL_*`** в `migration.env`;
-- после `02` нужен каталог `./artifacts/<RUN_ID>/pg_export` для `03`–`07`;
+- после `02` нужен каталог `./artifacts/<RUN_ID>/pg_export` для `03`–`07` (CSV + `source_env_files.tgz` + `source_files.tgz` с картинками сообщений);
 - `09` может упасть наполовине → resume через `RESUME_RUN_ID=...`;
 - перед cutover нужна **заморозка** source-бота и ручные smoke-тесты.
 
@@ -65,7 +65,7 @@
 - `PANEL_*` — куда смотрят шаги `04`–`07`, `09` (MySQL панели);
 - для сценария A: `PANEL_HOST=$TARGET_HOST`, `PANEL_PATH=$TARGET_PATH`, `PANEL_MYSQL_CONTAINER` = контейнер MySQL на платформе;
 - для сценария B: после `08` выставить `PANEL_PATH=/opt/marzban`, `PANEL_MYSQL_CONTAINER=marzban-mysql-1` (имя из `docker ps`);
-- `TARGET_BOT_DOMAIN` — домен панели (сценарий B) или пусто (сценарий A);
+- `TARGET_BOT_DOMAIN` — домен панели (сценарий B) или пусто (сценарий A). Пишется в `bots.domain`, в `bot_settings.subscription_domain` и в панель `sub_subscription_domain` (поля синкаются). `web_url` веб-кабинета **не** заполняется.
 - пропуск шагов `08`/`09` — вручную, по таблице сценария.
 
 ---
@@ -103,6 +103,23 @@ SELECT id, country_id, ip FROM vpn_servers ORDER BY id;
 ```
 
 Импорт (`03`) проставит всем подпискам `server_id = TARGET_SERVER_ID`. Значение **должно существовать** в `vpn_servers` на платформе, иначе в боте будет ошибка при «Настроить VPN» (нет флага страны).
+
+### 4. Dry-run (обязательно до cutover)
+
+`01_readonly_audit.sh` **ничего не меняет** на source/target: только SSH, SELECT, чтение `.env`. Старый бот продолжает работать.
+
+```bash
+./01_readonly_audit.sh
+```
+
+Смотреть `./artifacts/<RUN>/audit/dry_run_summary.json`:
+
+- `"ok": true` — можно идти дальше
+- `blockers` — пустые обязательные переменные, конфликты PG, несовместимая MySQL-схема
+- `settings_preview/` — что шаг `04` запишет в PG (`subscription_domain`, `marzban_subscription`) и в панель (`sub_subscription_domain`, **без** `web_url`)
+- `mysql_schema_diff.json` — какие колонки original Marzban переедут в fork (`dest_only_default` = новые поля вроде `bot_id`)
+
+Пока `ok` не true, шаги `00`/`08`/`09` не запускать.
 
 ---
 
@@ -142,7 +159,7 @@ SELECT id, country_id, ip FROM vpn_servers ORDER BY id;
 
 | Переменная | Когда нужна |
 |---|---|
-| `TARGET_BOT_DOMAIN` | **Сценарий B:** домен partner-панели (`app.example.ru`). Пусто в сценарии A. Нужен для Grafana external MySQL и поля `bots.domain`. |
+| `TARGET_BOT_DOMAIN` | **Сценарий B:** домен partner-панели (`app.example.ru`). Пусто в сценарии A. → `bots.domain`, PG `subscription_domain`, панель `sub_subscription_domain`. |
 | `TARGET_MARZBAN_ADMIN_*` | Ручные smoke-проверки API панели |
 | `SOURCE_MARZBAN_ADMIN_*` | Доступ к legacy-панели при аудите |
 
@@ -163,6 +180,17 @@ SELECT id, country_id, ip FROM vpn_servers ORDER BY id;
 | `PARTNER_SKIP_DNS_CHECK` / `SKIP_CERT` / `SKIP_FIREWALL` | Пропуск проверок при повторном прогоне |
 | `PARTNER_INSTALL_SCRIPT_LOCAL_PATH` | Локальный путь к `marzban.sh` (по умолчанию `../marzban.sh` от каталога скриптов) |
 
+### Шаг `11` — nginx на source (сценарий B)
+
+| Переменная | Описание |
+|---|---|
+| `PARTNER_PANEL_DOMAIN` / `TARGET_BOT_DOMAIN` | Основной `server_name` и путь Let's Encrypt. Опционально перекрыть `NGINX_DOMAIN` |
+| `NGINX_EXTRA_DOMAINS` | Дополнительные домены через запятую (тот же :443 → панель). Сертификат расширяется `--expand` |
+| `SKIP_CERT_EXPAND` | `true`: не трогать Let's Encrypt, только nginx `server_name` |
+| `PARTNER_PANEL_UVICORN_PORT` | Куда проксировать (по умолчанию `8001`) |
+
+`11` не гасит leftover `pg_nvb`. Сертификат: `/etc/letsencrypt/live/<основной-домен>/` (SAN после `--expand`). Renew переключается на webroot + hook `docker exec nginx_n_nvb nginx -s reload`. A-запись extra-доменов должна указывать на source.
+
 ### Шаг `09`
 
 | Переменная | Описание |
@@ -170,6 +198,7 @@ SELECT id, country_id, ip FROM vpn_servers ORDER BY id;
 | `MYSQL_SWAP_AT_RESTORE` | `true` (default): остановить legacy MySQL/Marzban на source, поднять partner на `:3306`. `false`: partner/panel MySQL уже запущен |
 | `LEGACY_MARZBAN_CONTAINER` | Legacy marzban на source (`nvb_marz`) |
 | `RESUME_RUN_ID` | Продолжить импорт из `./artifacts/<RUN_ID>/mysql_restore` без повторного дампа |
+| `SKIP_NODE_USAGE_TABLES` | `true`: не импортировать `node_usages` / `node_user_usages` (быстрый cutover, статистика нод в Grafana пустая) |
 | `PARTNER_MARZBAN_VERSION` | Тег образа `npvpn/panel` |
 
 ### SSH
@@ -188,15 +217,15 @@ SELECT id, country_id, ip FROM vpn_servers ORDER BY id;
 
 | # | Скрипт | Сценарий A | Сценарий B | Что делает |
 |---|---|---|---|---|
-| 1 | `01_readonly_audit.sh` | ✅ | ✅ | Preflight: инвентарь, PG counts, конфликты, legacy/multibot schema |
+| 1 | `01_readonly_audit.sh` | ✅ | ✅ | Dry-run: инвентарь, конфликты, preview настроек, schema-diff MySQL. **Нет записей** |
 | 2 | `00_create_target_bot.sh` | ✅ | ✅ | Строка `bots` + пустой `bot_settings` на target (нужен токен) |
 | 3 | `08_install_partner_panel_source.sh` | ⏭ пропуск | ✅ | `install-partner` на source (`/opt/marzban`) |
 | — | *правка `migration.env`* | `PANEL_*`=target | `PANEL_*`=/opt/marzban | Обязательная пауза |
 | 4 | `09_mysql_full_dump_restore_source_partner.sh` | ✅* | ✅ | Дамп legacy MySQL → импорт в fork multibot |
-| 5 | `02_pg_export_source.sh` | ✅ | ✅ | CSV + `source_env_files.tgz` → `./artifacts/<RUN_ID>/pg_export` |
-| 6 | `03_pg_import_target.sh ./artifacts/<RUN>/pg_export` | ✅ | ✅ | Импорт PG на target; `server_id` → `TARGET_SERVER_ID` |
-| 7 | `04_apply_settings_from_source_env.sh ./artifacts/<RUN>/pg_export` | ✅ | ✅ | Настройки бота, платежи, panel `bot_settings`, JWT legacy |
-| 8 | `05_marzban_merge_target.sh ./artifacts/<RUN>/pg_export` | ✅ | ✅ | `users.bot_id`, device_limit, host_bot_association |
+| 5 | `02_pg_export_source.sh` | ✅ | ✅ | CSV + `source_env_files.tgz` + `source_files.tgz` (`src/files`) → `./artifacts/<RUN_ID>/pg_export` |
+| 6 | `03_pg_import_target.sh ./artifacts/<RUN>/pg_export` | ✅ | ✅ | Импорт PG на target; `server_id` → `TARGET_SERVER_ID`; картинки → `{TARGET_PATH}/src/files/{TARGET_BOT_ID}__*` |
+| 7 | `04_apply_settings_from_source_env.sh ./artifacts/<RUN>/pg_export` | ✅ | ✅ | PG `bot_settings` (в т.ч. `marzban_subscription` + `subscription_domain`), платежи, панель `bot_settings` + `global_settings.panel`, JWT legacy |
+| 8 | `05_marzban_merge_target.sh ./artifacts/<RUN>/pg_export` | ✅ | ✅ | `users.bot_id`, device_limit (host_bot_association не трогать) |
 | 9 | `06_verify_cutover_checks.sh` | ✅ | ✅ | PG + MySQL verify в артефакты |
 | 10 | `07_repair_marzban_user_metadata.sh` | опционально | опционально | `users.created_at` для старых `/sub/` токенов |
 | 11 | `11_deploy_source_nginx.sh` | — | опционально | Nginx :443 → partner :8001 (без `:8001` в URL подписки) |
@@ -207,6 +236,8 @@ SELECT id, country_id, ip FROM vpn_servers ORDER BY id;
 
 ```bash
 RESUME_RUN_ID=20260710T031719Z ./09_mysql_full_dump_restore_source_partner.sh
+# быстрый повтор без статистики нод:
+RESUME_RUN_ID=20260710T031719Z MYSQL_SWAP_AT_RESTORE=false SKIP_NODE_USAGE_TABLES=true ./09_mysql_full_dump_restore_source_partner.sh
 ```
 
 ---
@@ -223,9 +254,12 @@ RESUME_RUN_ID=20260710T031719Z ./09_mysql_full_dump_restore_source_partner.sh
 
 Проверить `./artifacts/<RUN>/audit/`:
 
+- `dry_run_summary.json` — `"ok": true`
+- `source_files_inventory.txt` — список картинок из `src/files` (на платформе станут `{TARGET_BOT_ID}__имя`)
 - `target_pg_conflicts.txt` — конфликты `tg_user_id` / `subscriptions.id` должны быть **0**;
 - `source_pg_audit.txt` — counts, alembic;
 - до `08`: в `target_marzban_collisions.txt` режим **legacy** (нет таблицы `bots` в legacy MySQL) — это норма.
+- `settings_preview/panel_bot_settings.json` — `sub_subscription_domain` = `TARGET_BOT_DOMAIN`, поля `web_url` нет.
 
 ### `00` — запись бота на target
 
@@ -261,7 +295,7 @@ Legacy MySQL (`nvb_mysql`) **должен быть запущен** на source 
 ./09_mysql_full_dump_restore_source_partner.sh
 ```
 
-Ожидаемо: дамп → stop legacy → start partner → import → `bots` + `users.bot_id` → `marzban restart`.
+Ожидаемо: дамп (complete-insert) → stop legacy → start partner → rewrite колонок под fork → import → `bots` + `users.bot_id` + `source_bot_id` → `marzban restart`.
 
 ### `02` → `06` — PG и нормализация
 
@@ -283,9 +317,10 @@ EXPORT=./artifacts/<RUN_ID>/pg_export
    WHERE bot_id = <TARGET_BOT_ID>;
    ```
 2. **Grafana:** `admins.mysql_password` = `MYSQL_PASSWORD` marzban; на source UFW: `3306` только с `TARGET_HOST` (делает `install-partner` через `--bot-server-ip`).
-3. **Nginx** (опционально): `./11_deploy_source_nginx.sh` — подписки без `:8001`.
-4. **Partner `.env`:** `XRAY_SUBSCRIPTION_URL_PREFIX=https://<domain>`.
-5. Админка → **Test Marzban**; smoke `/sub/<token>`; один платёж.
+3. **Nginx** (сценарий B): `./11_deploy_source_nginx.sh` — `https://<PARTNER_PANEL_DOMAIN>/sub/...` без `:8001`. Берёт домен из `PARTNER_PANEL_DOMAIN` / `TARGET_BOT_DOMAIN`, сертификат `/etc/letsencrypt/live/<домен>/`. Не делает `docker compose down` старого стека.
+4. Админка → **Test Marzban**; smoke `/sub/<token>`; один платёж.
+5. Grafana: sync дашборда бота в админке (`admins.mysql_password` = `PARTNER_MYSQL_PASSWORD`).
+6. Рестарт процесса бота на платформе — проставит webhook.
 
 ---
 
@@ -355,7 +390,7 @@ MYSQL_SWAP_AT_RESTORE=false # если platform MySQL уже запущен
 | `panel_bot` | 1 строка с `TARGET_BOT_USERNAME` |
 | `users_for_bot` | ≈ числу подписок/пользователей |
 | `missing_tokens` | 0 |
-| `host_associations` | > 0 |
+| `host_associations` | как было до merge; 0 = локация всем ботам |
 
 ---
 
@@ -369,6 +404,7 @@ MYSQL_SWAP_AT_RESTORE=false # если platform MySQL уже запущен
 - [ ] `/sub/<legacy_token>` — 200 (при необходимости `07`).
 - [ ] Один реальный платёж + recurring smoke.
 - [ ] Grafana Marzban dashboard — данные (external: UFW + `mysql_password`).
+- [ ] Картинки сообщений на target: `{TARGET_PATH}/src/files/{TARGET_BOT_ID}__*.png` (см. `06` → `target_files_verify.txt`).
 - [ ] Не гасить source до зелёных проверок.
 
 ---
@@ -380,18 +416,24 @@ MYSQL_SWAP_AT_RESTORE=false # если platform MySQL уже запущен
 | `common.sh` | Общие функции (не запускать напрямую) |
 | `askpass.sh` | SSH askpass для пароля |
 | `00_create_target_bot.sh` | INSERT `bots` на target PG |
-| `01_readonly_audit.sh` | Read-only preflight |
-| `02_pg_export_source.sh` | Экспорт source PG в CSV |
-| `03_pg_import_target.sh` | Импорт в target PG |
-| `04_apply_settings_from_source_env.sh` | Настройки + payments + panel JWT |
-| `05_marzban_merge_target.sh` | Нормализация users/hosts в panel MySQL |
-| `06_verify_cutover_checks.sh` | Verify PG + panel MySQL |
+| `01_readonly_audit.sh` | Dry-run / read-only preflight |
+| `02_pg_export_source.sh` | Экспорт source PG в CSV + картинки `src/files` |
+| `03_pg_import_target.sh` | Импорт в target PG + копирование картинок как `{bot_id}__*` |
+| `04_apply_settings_from_source_env.sh` | Настройки PG + panel + payments + JWT |
+| `05_marzban_merge_target.sh` | Нормализация `users.bot_id` / device_limit / `source_bot_id` |
+| `06_verify_cutover_checks.sh` | Verify PG + panel MySQL + список `{bot_id}__*` на target |
 | `07_repair_marzban_user_metadata.sh` | Repair `created_at` для legacy sub URLs |
 | `08_install_partner_panel_source.sh` | Wrapper `install-partner` (сценарий B) |
-| `09_mysql_full_dump_restore_source_partner.sh` | Legacy MySQL → fork panel MySQL |
-| `11_deploy_source_nginx.sh` | Nginx proxy 443→8001 на source |
-| `docker-compose.nginx-only.yml` | Compose для nginx-only на source |
-| `nginx-megasecure-source.conf` | Пример vhost |
+| `09_mysql_full_dump_restore_source_partner.sh` | Legacy MySQL → fork panel MySQL (schema-safe) |
+| `10_merge_partner_users_into_shared_panel.sh` | Сценарий C: INSERT users в живую общую панель (без `host_bot_association`) |
+| `11_deploy_source_nginx.sh` | Nginx :443 → partner :8001 (`PARTNER_PANEL_DOMAIN`) |
+| `12_repair_host_bot_association.sh` | Снять ошибочные host↔bot связи перенесённого бота |
+| `settings_from_env.py` | Маппинг legacy `.env` → текущие bot_settings / panel settings |
+| `copy_bot_files.py` | Переименование `имя.ext` → `{bot_id}__имя.ext` |
+| `rewrite_mysqldump.py` | Фильтр дампа MySQL под колонки fork |
+| `mysql_schema_diff.py` | Сравнение колонок original vs fork (dry-run) |
+| `nginx-partner-source.conf.tmpl` | Шаблон vhost для шага `11` |
+| `nginx-megasecure-source.conf` | Старый пример MegaSecure (не используется `11`) |
 
 ---
 
@@ -401,11 +443,13 @@ MYSQL_SWAP_AT_RESTORE=false # если platform MySQL уже запущен
 |---|---|---|
 | KeyError `None_ru` в «Настроить VPN» | Неверный `subscriptions.server_id` | `UPDATE subscriptions SET server_id=...` на правильный `vpn_servers.id` |
 | Тарифы в USD | Старый баг маппинга валют | `03` мапит по `currencies.code`; проверить RUB в target PG |
-| `09` упал после дампа | Partner без таблицы `bots` | `RESUME_RUN_ID=<RUN> ./09_...` после `08` |
+| `09` упал после дампа | Partner без таблицы `bots` или старый dump без `source_mysql_columns.json` | `RESUME_RUN_ID=<RUN> ./09_...` после `08`; если нет columns json — переснять дамп |
+| Логин панели 500, `Table marzban.admins doesn't exist` | `09` оборвался на `marzban up` (already up) **или** во время `08` панель писала в legacy `nvb_mysql` на `:3306`, partner-том пустой | Дамп уже есть. `RESUME_RUN_ID=<RUN> MYSQL_SWAP_AT_RESTORE=false ./09_...` — скрипт сделает `marzban restart` (Alembic) и импорт |
 | Grafana пустая (external) | UFW / нет TCP до MySQL | `ufw allow from TARGET_IP to 3306`; `admins.mysql_password` |
 | `/sub/` 405 на HEAD | Норма | Проверять GET, не HEAD |
 | Browser 500 на `/sub/` | `sub/limited.html` нет в образе | Mount templates (отдельная задача) |
 | Bot domain invalid (web) | BotFather domain ≠ URL веба | `/setdomain` в @BotFather |
+| После `03` нет картинок у сообщений | Старый прогон `02`/`03` без `src/files` | Повторно `02` (или сразу `03` — он доберёт архив с source) и `03`. Если PG уже импортирован: `SKIP_PG_IMPORT=1 ./03_pg_import_target.sh "$EXPORT"` |
 
 ---
 

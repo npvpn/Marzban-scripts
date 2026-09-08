@@ -201,5 +201,134 @@ with open(inp, newline="") as f, open(out, "w") as w:
 PY
 run_mysql "$PANEL_REF" "$panel_mysql_db" "$PANEL_MYSQL_CONTAINER" < "$OUT_DIR/target_marzban_values.sql" > "$OUT_DIR/target_marzban_collisions.txt"
 
+echo "== Dry-run: migration.env completeness =="
+python3 "$SCRIPT_DIR/settings_from_env.py" \
+  --check-migration-env "$ENV_FILE" \
+  --out-dir "$OUT_DIR" || true
+
+echo "== Dry-run: source message images (src/files, read-only) =="
+list_source_files "$OUT_DIR/source_files_inventory.txt"
+echo "Image inventory: $OUT_DIR/source_files_inventory.txt"
+
+echo "== Dry-run: settings preview from source .env (read-only) =="
+run_ssh "$SOURCE_REF" "cd '$SOURCE_PATH' && tar -czf - .env .env.marzban 2>/dev/null || true" > "$OUT_DIR/source_env_files.tgz"
+TMP_ENV_DIR="$(mktemp -d)"
+tar -xzf "$OUT_DIR/source_env_files.tgz" -C "$TMP_ENV_DIR" 2>/dev/null || true
+python3 "$SCRIPT_DIR/settings_from_env.py" \
+  --env-dir "$TMP_ENV_DIR" \
+  --out-dir "$OUT_DIR/settings_preview" \
+  --target-bot-domain "${TARGET_BOT_DOMAIN:-}" \
+  --target-bot-username "${TARGET_BOT_USERNAME}" \
+  --target-bot-public-name "${TARGET_BOT_PUBLIC_NAME:-}" \
+  --target-bot-id "${TARGET_BOT_ID}"
+rm -rf "$TMP_ENV_DIR"
+echo "Settings preview: $OUT_DIR/settings_preview (web_url is not set)"
+
+echo "== Dry-run: legacy MySQL vs fork schema =="
+LEGACY_DATA_TABLES=(
+  users proxies hosts inbounds nodes jwt tls user_devices
+  user_usage_logs node_usages node_user_usages node_user_bs_usage node_user_blocks
+  system cascade_routes next_plans user_templates notification_reminders admin_usage_logs
+)
+source_mysql_db="$(awk -F= '$1=="MYSQL_DATABASE"{print $2}' "$OUT_DIR/source_mysql_env.txt")"
+source_tables=()
+for table in "${LEGACY_DATA_TABLES[@]}"; do
+  if [[ "$(mysql_table_exists "$SOURCE_REF" "$MYSQL_CONTAINER" "$source_mysql_db" "$table")" == "1" ]]; then
+    source_tables+=("$table")
+  fi
+done
+if [[ ${#source_tables[@]} -gt 0 ]]; then
+  write_mysql_columns_json "$SOURCE_REF" "$MYSQL_CONTAINER" "$source_mysql_db" "$OUT_DIR/source_mysql_columns.json" "${source_tables[@]}"
+  dest_cols_arg=""
+  if [[ "${panel_has_bots_table:-0}" == "1" ]]; then
+    write_mysql_columns_json "$PANEL_REF" "$PANEL_MYSQL_CONTAINER" "$panel_mysql_db" "$OUT_DIR/dest_mysql_columns.json" "${source_tables[@]}"
+    dest_cols_arg="--dest-columns-json $OUT_DIR/dest_mysql_columns.json"
+  fi
+  python3 "$SCRIPT_DIR/mysql_schema_diff.py" \
+    --source-columns-json "$OUT_DIR/source_mysql_columns.json" \
+    $dest_cols_arg \
+    --out "$OUT_DIR/mysql_schema_diff.json" || true
+else
+  echo '{"ok": false, "blockers": ["no known Marzban tables on source MySQL"], "tables": {}}' > "$OUT_DIR/mysql_schema_diff.json"
+fi
+
+echo "== Dry-run summary =="
+python3 - "$OUT_DIR" <<'PY'
+import json, re, sys
+from pathlib import Path
+
+out = Path(sys.argv[1])
+blockers = []
+warnings = []
+
+def load_json(name, default=None):
+    path = out / name
+    if not path.is_file():
+        return default if default is not None else {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default if default is not None else {}
+
+env = load_json("env_completeness.json")
+if env.get("missing_always"):
+    blockers.extend(f"missing {name}" for name in env["missing_always"])
+if env.get("missing_scenario_b"):
+    blockers.extend(f"missing {name}" for name in env["missing_scenario_b"])
+warnings.extend(env.get("warnings") or [])
+
+schema = load_json("mysql_schema_diff.json")
+blockers.extend(schema.get("blockers") or [])
+
+conflicts_text = (out / "target_pg_conflicts.txt").read_text(encoding="utf-8", errors="replace") if (out / "target_pg_conflicts.txt").is_file() else ""
+for label in ("conflict_users_tg", "conflict_subscriptions_id", "conflict_promo_codes", "conflict_sub_types"):
+    match = re.search(rf"{label}\s+\|\s+(\d+)", conflicts_text)
+    if match and int(match.group(1)) > 0:
+        blockers.append(f"{label}={match.group(1)}")
+
+files_inv = out / "source_files_inventory.txt"
+files_count = 0
+files_dir = ""
+if files_inv.is_file():
+    for line in files_inv.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("SOURCE_FILES_DIR="):
+            files_dir = line.split("=", 1)[1]
+        elif line.startswith("count="):
+            try:
+                files_count = int(line.split("=", 1)[1])
+            except ValueError:
+                files_count = 0
+if not files_dir:
+    warnings.append("source src/files not found — message images will not be copied")
+elif files_count == 0:
+    warnings.append("source src/files is empty — no message images to copy")
+
+preview_panel = load_json("settings_preview/panel_bot_settings.json")
+if preview_panel.get("web_url"):
+    blockers.append("settings preview unexpectedly set web_url")
+sub_domain = preview_panel.get("sub_subscription_domain") or ""
+pg_settings = load_json("settings_preview/bot_settings_patch.json")
+pg_domain = (pg_settings.get("subscription_domain") or "") if isinstance(pg_settings, dict) else ""
+
+summary = {
+    "ok": not blockers,
+    "blockers": blockers,
+    "warnings": warnings,
+    "subscription_domain_pg": pg_domain,
+    "sub_subscription_domain_panel": sub_domain,
+    "web_url_panel": preview_panel.get("web_url", ""),
+    "mysql_dest_source": schema.get("dest_source"),
+    "source_files_dir": files_dir,
+    "source_files_count": files_count,
+    "read_only": True,
+}
+(out / "dry_run_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print(json.dumps(summary, ensure_ascii=False, indent=2))
+if blockers:
+    print("DRY-RUN FAILED: see blockers above. Source bot was not changed.", file=sys.stderr)
+    raise SystemExit(1)
+print("DRY-RUN OK: no writes to source/target. Source bot keeps running.")
+PY
+
 echo "Audit complete: $OUT_DIR"
 

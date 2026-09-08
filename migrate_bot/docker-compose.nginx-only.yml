@@ -1,14 +1,8 @@
-# Minimal compose for source server after migration:
-# only nginx on :80/:443 → partner panel on host :8001.
+# Source host after partner-panel cutover:
+# nginx :80/:443 → Marzban on the host (HTTPS :8001 by default).
 #
-# Usage on source (144.31.19.112):
-#   cd /home/MegaSecureBot
-#   docker compose down          # stop old stack
-#   cp /path/to/nginx-megasecure-source.conf etc/nginx/conf/default.conf
-#   docker compose -f docker-compose.nginx-only.yml up -d
-#
-# Partner panel must be running separately:
-#   cd /opt/marzban && marzban up -n
+# Started by 11_deploy_source_nginx.sh with project name partner-nginx
+# so it does not take down the leftover legacy compose project.
 
 services:
   nginx:
@@ -20,12 +14,9 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    environment:
-      DOMAIN: ${DOMAIN:-app.megasecure.ru}
     volumes:
       - ./etc/nginx/conf:/etc/nginx/conf.d:ro
-      - ${CERT_FULLCHAIN_PATH}:/etc/nginx/certs/fullchain.pem:ro
-      - ${CERT_KEY_PATH}:/etc/nginx/certs/privkey.pem:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./certbot/data:/var/www/certbot:ro
       - ./var/log/nginx:/var/log/nginx
       - ./volumes/templates/404.html:/usr/share/nginx/html/custom_404.html:ro

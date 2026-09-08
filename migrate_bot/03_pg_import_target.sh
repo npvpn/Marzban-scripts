@@ -15,6 +15,9 @@ TARGET_REF="${TARGET_USER}@${TARGET_HOST}"
 REMOTE_DIR="/tmp/vpnzab_pg_import_${TARGET_BOT_ID}"
 CONTAINER_DIR="/tmp/vpnzab_pg_import_${TARGET_BOT_ID}"
 
+if [[ "${SKIP_PG_IMPORT:-}" == "1" ]]; then
+  echo "SKIP_PG_IMPORT=1 — skipping PostgreSQL import, copying message images only"
+else
 target_pg_env_file="$(mktemp)"
 remote_pg_env "$TARGET_REF" "$PG_CONTAINER" > "$target_pg_env_file"
 pg_user="$(awk -F= '$1=="PGUSER"{print $2}' "$target_pg_env_file")"
@@ -22,7 +25,7 @@ pg_db="$(awk -F= '$1=="PGDATABASE"{print $2}' "$target_pg_env_file")"
 rm -f "$target_pg_env_file"
 
 echo "Uploading CSV export to target: $REMOTE_DIR"
-tar -C "$EXPORT_DIR" -czf - . | run_ssh "$TARGET_REF" "rm -rf '$REMOTE_DIR' && mkdir -p '$REMOTE_DIR' && tar -xzf - -C '$REMOTE_DIR'"
+( cd "$EXPORT_DIR" && tar -czf - -- *.csv ) | run_ssh "$TARGET_REF" "rm -rf '$REMOTE_DIR' && mkdir -p '$REMOTE_DIR' && tar -xzf - -C '$REMOTE_DIR'"
 run_ssh "$TARGET_REF" "docker exec '$PG_CONTAINER' rm -rf '$CONTAINER_DIR' 2>/dev/null || true && docker cp '$REMOTE_DIR' '$PG_CONTAINER:$CONTAINER_DIR'"
 
 echo "Running target PostgreSQL import for bot_id=$TARGET_BOT_ID server_id=$TARGET_SERVER_ID"
@@ -335,7 +338,12 @@ SELECT m.new_id, :target_bot_id::bigint, s.chat_id, s.message_id, s.provider, s.
 FROM st_payments_messages s JOIN map_pay_msg m ON m.src_id = s.id;
 
 INSERT INTO mass_messages (id, bot_id, title, message, image_filename, created_at, status, recipient_count, success_count, error_count, filter_criteria)
-SELECT m.new_id, :target_bot_id::bigint, s.title, s.message, s.image_filename, s.created_at,
+SELECT m.new_id, :target_bot_id::bigint, s.title, s.message,
+  CASE
+    WHEN s.image_filename IS NULL OR BTRIM(s.image_filename) = '' THEN NULL
+    ELSE :target_bot_id::text || '__' || regexp_replace(regexp_replace(BTRIM(s.image_filename), '^.*/', ''), '^\d+__', '')
+  END,
+  s.created_at,
        s.status::massmessagestatus, COALESCE(s.recipient_count,0), COALESCE(s.success_count,0),
        COALESCE(s.error_count,0), s.filter_criteria
 FROM st_mass_messages s JOIN map_mass m ON m.src_id = s.id;
@@ -409,4 +417,12 @@ UNION ALL SELECT 'payments_without_subscription', count(*) FROM payments WHERE b
 SQL
 
 echo "Target PostgreSQL import complete."
+fi
+
+FILES_TGZ="$EXPORT_DIR/source_files.tgz"
+if [[ ! -s "$FILES_TGZ" ]]; then
+  echo "source_files.tgz missing or empty — fetching message images from source now"
+  fetch_source_files_tgz "$FILES_TGZ" "$EXPORT_DIR/source_files_list.txt"
+fi
+copy_prefixed_bot_files_to_target "$FILES_TGZ" "$EXPORT_DIR/files_rename_manifest.json"
 
