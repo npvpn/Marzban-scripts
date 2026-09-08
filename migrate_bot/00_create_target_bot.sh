@@ -18,6 +18,9 @@ pg_db="$(awk -F= '$1=="PGDATABASE"{print $2}' "$target_pg_env_file")"
 rm -f "$target_pg_env_file"
 
 echo "Creating/updating target bot row id=$TARGET_BOT_ID username=$TARGET_BOT_USERNAME"
+defaults_json="$(python3 "$SCRIPT_DIR/settings_from_env.py" --defaults-only \
+  --target-bot-public-name "${TARGET_BOT_PUBLIC_NAME}" \
+  --target-bot-domain "${TARGET_BOT_DOMAIN:-}")"
 run_ssh "$TARGET_REF" "docker exec -i '$PG_CONTAINER' psql -v ON_ERROR_STOP=1 -U '$pg_user' -d '$pg_db'" >/dev/null <<SQL
 BEGIN;
 INSERT INTO bots (id, username, public_name, api_token, webhook, domain, admin_id)
@@ -29,7 +32,7 @@ ON CONFLICT (id) DO UPDATE SET
   domain = EXCLUDED.domain,
   admin_id = EXCLUDED.admin_id;
 INSERT INTO bot_settings (bot_id, data)
-VALUES (${TARGET_BOT_ID}, '{}'::jsonb)
+VALUES (${TARGET_BOT_ID}, \$migjson\$${defaults_json}\$migjson\$::jsonb)
 ON CONFLICT (bot_id) DO NOTHING;
 SELECT setval(pg_get_serial_sequence('bots','id'), GREATEST((SELECT COALESCE(MAX(id),1) FROM bots), 1), true)
 WHERE pg_get_serial_sequence('bots','id') IS NOT NULL;

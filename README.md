@@ -2,35 +2,53 @@
 Скрипты для Marzban
 
 ## Установка Marzban
-- **Установить Marzban с SQLite**:
+- **Установить Marzban с SQLite** (без SSL, порт 8000):
 
 ```bash
 sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install
 ```
 
-- **Установить Marzban с MySQL**:
+- **Установить Marzban с MySQL** (Let's Encrypt, HTTPS :8001). Интерактивно скрипт спросит домен и email:
 
   ```bash
   sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mysql
   ```
 
+  С параметрами:
+
+  ```bash
+  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mysql \
+    --domain panel.example.com \
+    --cert-email admin@example.com \
+    --non-interactive
+  ```
+
 - **Установить Marzban с MariaDB**:
 
   ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb
+  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb \
+    --domain panel.example.com \
+    --cert-email admin@example.com
   ```
   
 - **Установить Marzban с MariaDB и dev-веткой**:
 
   ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --dev
+  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --dev \
+    --domain panel.example.com \
+    --cert-email admin@example.com
   ```
 
 - **Установить Marzban с MariaDB и конкретной версией**:
 
   ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --version v0.5.2
+  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --version v0.5.2 \
+    --domain panel.example.com \
+    --cert-email admin@example.com
   ```
+
+Флаги SSL (только mysql/mariadb): `--domain`, `--cert-email`, `--uvicorn-port 8001`, `--skip-dns-check`, `--skip-cert`, `--non-interactive`, `--no-logs`.  
+Нужны A-запись домена на сервер, свободный порт 80, Debian/Ubuntu. Админа после установки: `marzban cli admin create`. Панель: `https://<домен>:8001/dashboard/`.
 
 - **Обновить или изменить версию Xray-core**:
 

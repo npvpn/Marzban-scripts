@@ -62,6 +62,11 @@ SELECT 'host_associations' AS section, COUNT(*) AS value FROM host_bot_associati
 SELECT 'username_duplicates' AS section, username, COUNT(*) AS value FROM users GROUP BY username HAVING COUNT(*) > 1 LIMIT 20;
 SQL
 
+echo "Verifying prefixed message images on target"
+dest_files="$(remote_target_files_dir)"
+run_ssh "$TARGET_REF" "printf 'TARGET_FILES_DIR=%s\n' '$dest_files'; find '$dest_files' -maxdepth 1 -type f -name '${TARGET_BOT_ID}__*' -printf '%f\\n' 2>/dev/null | sort; printf 'count='; find '$dest_files' -maxdepth 1 -type f -name '${TARGET_BOT_ID}__*' 2>/dev/null | wc -l" \
+  > "$OUT_DIR/target_files_verify.txt"
+
 echo "Verification files:"
-printf '%s\n' "$OUT_DIR/target_pg_verify.txt" "$OUT_DIR/target_marzban_verify.txt"
+printf '%s\n' "$OUT_DIR/target_pg_verify.txt" "$OUT_DIR/target_marzban_verify.txt" "$OUT_DIR/target_files_verify.txt"
 
