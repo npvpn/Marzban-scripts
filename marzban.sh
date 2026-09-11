@@ -740,13 +740,83 @@ get_mysql_bind_address() {
     fi
 }
 
+CERTBOT_MARZBAN_HOOK="/etc/letsencrypt/renewal-hooks/deploy/restart-marzban.sh"
+
 get_marzban_ssl_volume_lines() {
     if [ -n "$SSL_DOMAIN" ]; then
+        # Весь каталог: live/*.pem — symlink на archive/; bind-mount файла
+        # замораживает старый inode и после certbot renew контейнер не видит новый cert.
         cat <<EOF
-      - /etc/letsencrypt/live/${SSL_DOMAIN}/fullchain.pem:/etc/letsencrypt/live/${SSL_DOMAIN}/fullchain.pem:ro
-      - /etc/letsencrypt/live/${SSL_DOMAIN}/privkey.pem:/etc/letsencrypt/live/${SSL_DOMAIN}/privkey.pem:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
 EOF
     fi
+}
+
+panel_uses_letsencrypt_ssl() {
+    [ -f "$ENV_FILE" ] && grep -qE 'UVICORN_SSL_CERTFILE[[:space:]]*=.*letsencrypt' "$ENV_FILE"
+}
+
+ensure_letsencrypt_compose_volume() {
+    [ -f "$COMPOSE_FILE" ] || return 0
+    if grep -qE -- '- /etc/letsencrypt:/etc/letsencrypt' "$COMPOSE_FILE"; then
+        return 0
+    fi
+    if ! grep -q '/etc/letsencrypt' "$COMPOSE_FILE"; then
+        return 0
+    fi
+
+    colorized_echo blue "Updating docker-compose.yml: mount /etc/letsencrypt (certbot renew visible in container)"
+    sed -i '/\/etc\/letsencrypt\/live\//d' "$COMPOSE_FILE"
+    if grep -qE -- '- /etc/letsencrypt:/etc/letsencrypt' "$COMPOSE_FILE"; then
+        return 0
+    fi
+    if grep -q '/var/lib/marzban/logs:/var/lib/marzban-node' "$COMPOSE_FILE"; then
+        sed -i '/\/var\/lib\/marzban\/logs:\/var\/lib\/marzban-node/a\      - /etc/letsencrypt:/etc/letsencrypt:ro' "$COMPOSE_FILE"
+        return 0
+    fi
+    colorized_echo yellow "Could not insert /etc/letsencrypt volume automatically. Add it under services.marzban.volumes."
+}
+
+install_certbot_marzban_renew_hook() {
+    if [ -z "$SSL_DOMAIN" ] && ! panel_uses_letsencrypt_ssl; then
+        return 0
+    fi
+
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    cat > "$CERTBOT_MARZBAN_HOOK" <<EOF
+#!/bin/bash
+# Uvicorn читает TLS-сертификат только при старте — после renew нужен restart панели.
+ENV_FILE="$ENV_FILE"
+MARZBAN_BIN="/usr/local/bin/marzban"
+
+if [ -n "\${RENEWED_LINEAGE:-}" ] && [ -f "\$ENV_FILE" ]; then
+    if ! grep -q "\$RENEWED_LINEAGE" "\$ENV_FILE"; then
+        echo "restart-marzban: skip \$RENEWED_LINEAGE (not this panel cert)" >&2
+        exit 0
+    fi
+fi
+
+if [ -x "\$MARZBAN_BIN" ]; then
+    "\$MARZBAN_BIN" restart -n
+    exit \$?
+fi
+echo "restart-marzban: \$MARZBAN_BIN not found" >&2
+exit 1
+EOF
+    chmod 755 "$CERTBOT_MARZBAN_HOOK"
+    colorized_echo green "Certbot deploy hook installed: $CERTBOT_MARZBAN_HOOK"
+}
+
+remove_certbot_marzban_renew_hook() {
+    if [ -f "$CERTBOT_MARZBAN_HOOK" ]; then
+        rm -f "$CERTBOT_MARZBAN_HOOK"
+        colorized_echo yellow "Removed certbot deploy hook: $CERTBOT_MARZBAN_HOOK"
+    fi
+}
+
+ensure_ssl_runtime() {
+    ensure_letsencrypt_compose_volume
+    install_certbot_marzban_renew_hook
 }
 
 configure_ssl_env() {
@@ -1443,7 +1513,7 @@ print_post_install_checklist() {
     echo "  4. Configure per-bot payment providers (e.g. YooKassa)"
     echo "  5. Log out and sign in as the partner admin (plain password, not hash)"
     echo
-    colorized_echo cyan "Certificate renewal: certbot renew (systemd timer is usually installed with certbot)"
+    colorized_echo cyan "Certificate renewal: certbot renew (systemd timer) + deploy hook $CERTBOT_MARZBAN_HOOK"
     colorized_echo blue "====================================="
 }
 
@@ -1815,6 +1885,7 @@ install_partner_command() {
         exit 1
     fi
 
+    ensure_ssl_runtime
     up_marzban
     wait_for_marzban_ready "$PARTNER_UVICORN_PORT"
     create_panel_admin "$PARTNER_ADMIN_USERNAME" "$PARTNER_ADMIN_PASSWORD_HASH"
@@ -2007,6 +2078,9 @@ install_command() {
         echo "Invalid version format. Please enter a valid version (e.g. v0.5.2)"
         exit 1
     fi
+    if [ -n "$SSL_DOMAIN" ]; then
+        ensure_ssl_runtime
+    fi
     up_marzban
 
     if [ -n "$SSL_DOMAIN" ]; then
@@ -2145,6 +2219,7 @@ uninstall_command() {
     if is_marzban_up; then
         down_marzban
     fi
+    remove_certbot_marzban_renew_hook
     uninstall_marzban_script
     uninstall_marzban
     uninstall_marzban_docker_images
@@ -2376,6 +2451,7 @@ update_command() {
     detect_compose
     
     update_marzban_script
+    ensure_ssl_runtime
     colorized_echo blue "Pulling latest version"
     update_marzban
     

@@ -50,6 +50,8 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 Флаги SSL (только mysql/mariadb): `--domain`, `--cert-email`, `--uvicorn-port 8001`, `--skip-dns-check`, `--skip-cert`, `--non-interactive`, `--no-logs`.  
 Нужны A-запись домена на сервер, свободный порт 80, Debian/Ubuntu. Админа после установки: `marzban cli admin create`. Панель: `https://<домен>:8001/dashboard/`.
 
+Сертификат: в compose монтируется `/etc/letsencrypt` целиком (чтобы после `certbot renew` контейнер видел новые файлы, а не старый inode). Uvicorn читает cert только при старте — скрипт ставит deploy-hook `/etc/letsencrypt/renewal-hooks/deploy/restart-marzban.sh`. На уже установленной панели то же делает `marzban update`.
+
 - **Обновить или изменить версию Xray-core**:
 
   ```bash
