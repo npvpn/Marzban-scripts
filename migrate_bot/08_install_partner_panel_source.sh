@@ -11,8 +11,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${PARTNER_ADMIN_USERNAME:?Set PARTNER_ADMIN_USERNAME in migration.env}"
 : "${PARTNER_ADMIN_PASSWORD_HASH:?Set PARTNER_ADMIN_PASSWORD_HASH in migration.env}"
 : "${PARTNER_SUBSCRIPTION_TITLE:?Set PARTNER_SUBSCRIPTION_TITLE in migration.env}"
-: "${PARTNER_SUPPORT_TELEGRAM:?Set PARTNER_SUPPORT_TELEGRAM in migration.env}"
 : "${PARTNER_BOT_TELEGRAM:?Set PARTNER_BOT_TELEGRAM in migration.env}"
+PARTNER_SUPPORT_TELEGRAM="${PARTNER_SUPPORT_TELEGRAM:-}"
 
 PARTNER_PANEL_UVICORN_PORT="${PARTNER_PANEL_UVICORN_PORT:-8001}"
 PARTNER_BOT_SERVER_IP="${PARTNER_BOT_SERVER_IP:-$TARGET_HOST}"
@@ -40,7 +40,6 @@ declare -a install_args=(
   --admin-username "$PARTNER_ADMIN_USERNAME"
   --admin-password-hash "$PARTNER_ADMIN_PASSWORD_HASH"
   --subscription-title "$PARTNER_SUBSCRIPTION_TITLE"
-  --support-telegram "$PARTNER_SUPPORT_TELEGRAM"
   --bot-telegram "$PARTNER_BOT_TELEGRAM"
   --database "$PARTNER_DATABASE_TYPE"
   --version "$PARTNER_MARZBAN_VERSION"
@@ -49,6 +48,9 @@ declare -a install_args=(
   --non-interactive
 )
 
+if [[ -n "$PARTNER_SUPPORT_TELEGRAM" ]]; then
+  install_args+=(--support-telegram "$PARTNER_SUPPORT_TELEGRAM")
+fi
 if [[ "${PARTNER_SKIP_DNS_CHECK:-false}" == "true" ]]; then
   install_args+=(--skip-dns-check)
 fi

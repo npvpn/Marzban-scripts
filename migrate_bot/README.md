@@ -173,7 +173,7 @@ SELECT id, country_id, ip FROM vpn_servers ORDER BY id;
 | `PARTNER_ADMIN_USERNAME` | Логин админа панели |
 | `PARTNER_ADMIN_PASSWORD_HASH` | Argon2-хэш из админки бота |
 | `PARTNER_SUBSCRIPTION_TITLE` | Заголовок подписки в клиентах |
-| `PARTNER_SUPPORT_TELEGRAM` | @ поддержки без `t.me/` |
+| `PARTNER_SUPPORT_TELEGRAM` | необязательно: @ поддержки без `t.me/` |
 | `PARTNER_BOT_TELEGRAM` | @ бота без `t.me/` |
 | `PARTNER_BOT_SERVER_IP` | Публичный IPv4 **платформы** (`TARGET_HOST`); UFW откроет MySQL `3306` только для него |
 | `PARTNER_PANEL_UVICORN_PORT` | Порт панели (по умолчанию `8001`) |

@@ -1191,13 +1191,6 @@ configure_subscription_settings() {
 
     if [ -n "$PARTNER_SUPPORT_TELEGRAM" ]; then
         support_username=$(normalize_telegram_username "$PARTNER_SUPPORT_TELEGRAM")
-    elif [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
-        support_username=""
-    else
-        echo "Подсказка: вводите только username без https://t.me/ (допустимо с @ — уберём)."
-        printf "Ссылка поддержки — username без https://t.me/ (можно с @): "
-        read support_username
-        support_username=$(normalize_telegram_username "$support_username")
     fi
 
     if [ -n "$PARTNER_SUBSCRIPTION_TITLE" ]; then
@@ -1361,8 +1354,14 @@ configure_partner_firewall() {
     ufw allow 443/tcp
     ufw allow 8443/tcp
     ufw allow "${panel_port}/tcp"
-    validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
-    ufw allow from "${PARTNER_BOT_SERVER_IP}" to any port 3306 proto tcp comment 'Bot platform Grafana -> Marzban MySQL'
+    if [ -n "$PARTNER_BOT_SERVER_IP" ]; then
+        validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
+        ufw allow from "${PARTNER_BOT_SERVER_IP}" to any port 3306 proto tcp comment 'Bot platform Grafana -> Marzban MySQL'
+        colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, 8443/tcp, ${panel_port}/tcp, 3306/tcp from ${PARTNER_BOT_SERVER_IP}"
+    else
+        colorized_echo yellow "Skipping MySQL 3306 UFW rule: --bot-server-ip not set."
+        colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, 8443/tcp, ${panel_port}/tcp"
+    fi
 
     if ufw status 2>/dev/null | grep -q "Status: active"; then
         colorized_echo green "UFW is already enabled."
@@ -1370,8 +1369,6 @@ configure_partner_firewall() {
         ufw --force enable
         colorized_echo green "UFW enabled."
     fi
-
-    colorized_echo green "Firewall rules applied: 22/tcp, 80/tcp, 443/tcp, 8443/tcp, ${panel_port}/tcp, 3306/tcp from ${PARTNER_BOT_SERVER_IP}"
 }
 
 issue_ssl_certificate() {
@@ -1589,9 +1586,7 @@ require_partner_params() {
     [ -z "$PARTNER_ADMIN_USERNAME" ] && missing+=("--admin-username")
     [ -z "$PARTNER_ADMIN_PASSWORD_HASH" ] && missing+=("--admin-password-hash")
     [ -z "$PARTNER_SUBSCRIPTION_TITLE" ] && missing+=("--subscription-title")
-    [ -z "$PARTNER_SUPPORT_TELEGRAM" ] && missing+=("--support-telegram")
     [ -z "$PARTNER_BOT_TELEGRAM" ] && missing+=("--bot-telegram")
-    [ -z "$PARTNER_BOT_SERVER_IP" ] && missing+=("--bot-server-ip")
 
     if [ ${#missing[@]} -gt 0 ]; then
         colorized_echo red "Missing required options for non-interactive install: ${missing[*]}"
@@ -1657,11 +1652,7 @@ prompt_partner_install_params() {
     fi
 
     if [ -z "$PARTNER_SUPPORT_TELEGRAM" ]; then
-        read -p "Support Telegram username (without t.me/): " PARTNER_SUPPORT_TELEGRAM
-    fi
-    if [ -z "$PARTNER_SUPPORT_TELEGRAM" ]; then
-        colorized_echo red "Support Telegram username cannot be empty."
-        exit 1
+        read -p "Support Telegram username (without t.me/, empty to skip): " PARTNER_SUPPORT_TELEGRAM
     fi
 
     if [ -z "$PARTNER_BOT_TELEGRAM" ]; then
@@ -1682,10 +1673,12 @@ prompt_partner_install_params() {
         read -p "Runner registration token (empty to skip): " PARTNER_RUNNER_TOKEN
     fi
     if [ -z "$PARTNER_BOT_SERVER_IP" ]; then
-        read -p "Bot platform server public IP (for Grafana MySQL access): " PARTNER_BOT_SERVER_IP
+        read -p "Bot platform server public IP (for Grafana MySQL access, empty to skip): " PARTNER_BOT_SERVER_IP
     fi
     PARTNER_BOT_SERVER_IP=$(echo "$PARTNER_BOT_SERVER_IP" | tr -d '[:space:]')
-    validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
+    if [ -n "$PARTNER_BOT_SERVER_IP" ]; then
+        validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
+    fi
 }
 
 parse_partner_install_args() {
@@ -1805,7 +1798,9 @@ install_partner_command() {
 
     if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
         require_partner_params
-        validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
+        if [ -n "$PARTNER_BOT_SERVER_IP" ]; then
+            validate_bot_server_ip "$PARTNER_BOT_SERVER_IP"
+        fi
     else
         prompt_partner_install_params
     fi

@@ -93,7 +93,6 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
   --admin-username partner_admin \
   --admin-password-hash '$argon2id$...' \
   --subscription-title 'My VPN' \
-  --support-telegram support_bot \
   --bot-telegram my_vpn_bot \
   --token 'GITHUB_RUNNER_REGISTRATION_TOKEN' \
   --bot-server-ip 1.1.1.1 \
@@ -102,7 +101,7 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 
 `--token` — registration token self-hosted runner (репа `npvpn/telegram_bot`, ~1 час).  
 Метка runner = `partner-<bot-telegram>` (например `partner-my_vpn_bot`).  
-Опционально: `--project-dir /opt/marzban` (по умолчанию), `--skip-runner`.
+Опционально: `--project-dir /opt/marzban` (по умолчанию), `--skip-runner`, `--support-telegram`, `--bot-server-ip`.
 
 Дополнительные флаги панели: `--database mysql|mariadb`, `--version v0.5.2`, `--dev`, `--uvicorn-port 8001`, `--bot-server-ip <IPv4>`, `--skip-dns-check`, `--skip-cert`, `--skip-firewall`, `--no-logs`.
 
