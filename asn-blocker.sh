@@ -11,6 +11,13 @@ NFT_SET_V4="blocked_v4"
 NFT_SET_V6="blocked_v6"
 NFT_CHAIN_OUT="output"
 
+NFT_SCAN_TABLE="scanblock"
+NFT_SET_SCAN_V4="scanners_v4"
+SCAN_LIST_URL="https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt"
+SCAN_FILE="$STATE_DIR/skipa_v4.txt"
+SCAN_MIN_ENTRIES=20
+SCAN_MIN_PREFIXLEN=16
+
 LOG_FILE="/var/log/asn-blocker.log"
 RSYSLOG_CONF="/etc/rsyslog.d/30-asn-blocker.conf"
 LOGROTATE_CONF="/etc/logrotate.d/asn-blocker"
@@ -31,6 +38,7 @@ Usage:
   asn-blocker.sh block <ASN> [ASN...]
   asn-blocker.sh unblock <ASN> [ASN...]
   asn-blocker.sh refresh [ASN...]
+  asn-blocker.sh scanners-refresh
   asn-blocker.sh list
   asn-blocker.sh status
   asn-blocker.sh check-ip <IPv4|IPv6>
@@ -489,6 +497,83 @@ if not hit:
 PY
 }
 
+init_nft_scan() {
+    local flags
+    flags="$(detect_nft_set_flags)"
+
+    if ! nft list table inet "$NFT_SCAN_TABLE" >/dev/null 2>&1; then
+        nft add table inet "$NFT_SCAN_TABLE"
+    fi
+    if ! nft list set inet "$NFT_SCAN_TABLE" "$NFT_SET_SCAN_V4" >/dev/null 2>&1; then
+        nft add set inet "$NFT_SCAN_TABLE" "$NFT_SET_SCAN_V4" "{ type ipv4_addr; flags ${flags}; }"
+    fi
+    if ! nft list chain inet "$NFT_SCAN_TABLE" input >/dev/null 2>&1; then
+        nft add chain inet "$NFT_SCAN_TABLE" input "{ type filter hook input priority -10; policy accept; }"
+        nft add rule inet "$NFT_SCAN_TABLE" input ip saddr "@${NFT_SET_SCAN_V4}" counter drop
+    fi
+}
+
+refresh_scanners() {
+    init_nft_scan
+
+    local raw new tmp count
+    raw="$(mktemp)"
+    new="$(mktemp)"
+    tmp="$(mktemp)"
+
+    if ! curl -fsSL --max-time 30 "$SCAN_LIST_URL" >"$raw"; then
+        echo "Failed to download scanner list, keeping previous set." >&2
+        rm -f "$raw" "$new" "$tmp"
+        return 1
+    fi
+
+    python3 - "$raw" "$new" "$SCAN_MIN_PREFIXLEN" <<'PY'
+import ipaddress
+import pathlib
+import re
+import sys
+
+src, dst, minlen = sys.argv[1], sys.argv[2], int(sys.argv[3])
+nets = set()
+for line in pathlib.Path(src).read_text().splitlines():
+    m = re.match(r'^\s*(\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?)\s*$', line)
+    if not m:
+        continue
+    try:
+        n = ipaddress.ip_network(m.group(1), strict=False)
+    except ValueError:
+        continue
+    if n.version == 4 and n.prefixlen >= minlen:
+        nets.add(n)
+
+out = ipaddress.collapse_addresses(sorted(nets, key=lambda n: (int(n.network_address), n.prefixlen)))
+pathlib.Path(dst).write_text("".join(f"{n}\n" for n in out))
+PY
+
+    count="$(wc -l <"$new")"
+    if (( count < SCAN_MIN_ENTRIES )); then
+        echo "Scanner list looks broken (${count} entries), keeping previous set." >&2
+        rm -f "$raw" "$new" "$tmp"
+        return 1
+    fi
+
+    {
+        echo "flush set inet $NFT_SCAN_TABLE $NFT_SET_SCAN_V4"
+        echo "add element inet $NFT_SCAN_TABLE $NFT_SET_SCAN_V4 { $(paste -sd, "$new") }"
+    } >"$tmp"
+
+    if ! nft -c -f "$tmp"; then
+        echo "nft rejected the generated ruleset, nothing applied." >&2
+        rm -f "$raw" "$new" "$tmp"
+        return 1
+    fi
+    nft -f "$tmp"
+
+    cp "$new" "$SCAN_FILE"
+    echo "Scanner blocklist loaded: ${count} prefixes."
+    rm -f "$raw" "$new" "$tmp"
+}
+
 setup_logging() {
     resolve_log_owner
 
@@ -548,6 +633,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Refresh blocked ASN prefixes daily at 04:15
 15 4 * * * root /usr/local/bin/asn-blocker refresh >/var/log/asn-blocker-refresh.log 2>&1
+20 4 * * * root /usr/local/bin/asn-blocker scanners-refresh >/var/log/asn-blocker-scanners.log 2>&1
+@reboot root sleep 35 && /usr/local/bin/asn-blocker scanners-refresh >/var/log/asn-blocker-scanners.log 2>&1
 EOF
     chmod 0644 "$CRON_FILE"
     enable_cron_service
@@ -568,6 +655,7 @@ run_bootstrap() {
     init_nft
     setup_logging
     setup_refresh_cron
+    refresh_scanners || echo "Scanner blocklist was not loaded, retry: asn-blocker scanners-refresh" >&2
     echo "Install complete: dependencies, nft init, logging, and cron refresh are configured."
 }
 
@@ -633,6 +721,11 @@ main() {
             setup_logging
             setup_refresh_cron
             refresh_asn "$@"
+            ;;
+        scanners-refresh)
+            install_missing_dependencies "base"
+            ensure_state_dirs
+            refresh_scanners
             ;;
         list)
             install_missing_dependencies "all"
