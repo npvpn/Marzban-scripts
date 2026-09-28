@@ -13,7 +13,7 @@ NFT_CHAIN_OUT="output"
 
 NFT_SCAN_TABLE="scanblock"
 NFT_SET_SCAN_V4="scanners_v4"
-SCAN_LIST_URL="https://raw.githubusercontent.com/tread-lightly/CyberOK_Skipa_ips/main/lists/skipa_cidr.txt"
+SCAN_LIST_URL="https://raw.githubusercontent.com/npvpn/Marzban-scripts/master/lists/skipa_cidr.txt"
 SCAN_FILE="$STATE_DIR/skipa_v4.txt"
 SCAN_MIN_ENTRIES=20
 SCAN_MIN_PREFIXLEN=16
