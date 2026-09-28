@@ -181,7 +181,7 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 - Добавляет префикс логов `ASN-BLOCK` для заблокированных пакетов
 - Всегда настраивает отдельный лог `/var/log/asn-blocker.log` и ротацию через `logrotate`
 - Всегда настраивает автообновление префиксов через cron (`/etc/cron.d/asn-blocker-refresh`)
-- Отдельно блокирует **входящий** трафик от адресов сканеров СКИПА (CyberOK), а также адресов, которые связаны с ГРЧЦ и НКЦКИ: список берётся из репозитория [tread-lightly/CyberOK_Skipa_ips](https://github.com/tread-lightly/CyberOK_Skipa_ips) (`lists/skipa_cidr.txt`) и загружается в `nftables` (таблица `inet scanblock`)
+- Отдельно блокирует **входящий** трафик от адресов сканеров СКИПА (CyberOK), а также адресов, которые связывают с ГРЧЦ и НКЦКИ: список хранится в репозитории (`lists/skipa_cidr.txt`) и загружается в `nftables` (таблица `inet scanblock`)
 
 ### Быстрая установка как команды `asn-blocker`
 
