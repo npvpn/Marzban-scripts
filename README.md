@@ -181,6 +181,7 @@ sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/mar
 - Добавляет префикс логов `ASN-BLOCK` для заблокированных пакетов
 - Всегда настраивает отдельный лог `/var/log/asn-blocker.log` и ротацию через `logrotate`
 - Всегда настраивает автообновление префиксов через cron (`/etc/cron.d/asn-blocker-refresh`)
+- Отдельно блокирует **входящий** трафик от адресов сканеров СКИПА (CyberOK), а также адресов, которые связывают с ГРЧЦ и НКЦКИ: список хранится в репозитории (`lists/skipa_cidr.txt`) и загружается в `nftables` (таблица `inet scanblock`)
 
 ### Быстрая установка как команды `asn-blocker`
 
@@ -195,6 +196,7 @@ sudo asn-blocker install
 - устанавливает зависимости (`nftables`, `curl`, `jq`, `ripgrep`, `python3`, `cron`, `rsyslog`, `logrotate`);
 - инициализирует `nftables` таблицу/сеты;
 - настраивает логирование блокировок;
+- загружает список адресов сканеров СКИПА/ГРЧЦ и включает их блокировку на входящем трафике;
 - добавляет ежедневный cron refresh.
 
 Расшифровка команд:
@@ -210,6 +212,7 @@ sudo asn-blocker install
 - `sudo asn-blocker unblock AS28753` — удаляет ASN из блок-листа и убирает его префиксы из `nftables`.
 - `sudo asn-blocker logs 200` — показывает последние логи блокировок из `journald` и `/var/log/asn-blocker.log`.
 - `sudo asn-blocker cron-status` — показывает текущую cron-задачу автообновления.
+- `sudo asn-blocker scanners-refresh` — скачивает актуальный список адресов сканеров СКИПА/ГРЧЦ и атомарно заменяет им содержимое блок-листа входящего трафика.
 
 ### Логирование и хранение
 
@@ -222,5 +225,5 @@ sudo asn-blocker cron-status
 
 - `/etc/rsyslog.d/30-asn-blocker.conf`
 - `/etc/logrotate.d/asn-blocker` (ежедневная ротация, 14 файлов, сжатие)
-- `/etc/cron.d/asn-blocker-refresh` (ежедневный refresh в 04:15)
+- `/etc/cron.d/asn-blocker-refresh` (ежедневный refresh ASN в 04:15, обновление списка сканеров в 04:20 и после каждой загрузки системы)
 - `/etc/systemd/journald.conf.d/30-asn-blocker.conf` (`ForwardToSyslog=yes` для стабильной доставки kernel-логов в rsyslog)
