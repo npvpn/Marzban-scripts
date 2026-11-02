@@ -1098,6 +1098,43 @@ follow_marzban_logs() {
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" logs -f
 }
 
+print_install_access() {
+    local admin_created=$1
+    local username=${2:-}
+    local password=${3:-}
+
+    echo
+    colorized_echo blue "====================================="
+    colorized_echo blue "         Installation complete"
+    colorized_echo blue "====================================="
+
+    if [ -n "$SSL_DOMAIN" ]; then
+        colorized_echo green "Panel URL: https://${SSL_DOMAIN}:${SSL_UVICORN_PORT}/dashboard/#/login"
+    else
+        local ip
+        ip="$(get_server_public_ip)"
+        if [ -n "$ip" ]; then
+            colorized_echo green "Panel URL: http://${ip}:8000/dashboard/#/login"
+        else
+            colorized_echo green "Panel URL: http://<server-ip>:8000/dashboard/#/login"
+        fi
+    fi
+
+    if [ "$admin_created" = "true" ]; then
+        colorized_echo green "Panel admin username: ${username}"
+        colorized_echo green "Panel admin password: ${password}"
+    else
+        colorized_echo yellow "No panel administrator was created."
+        colorized_echo cyan "Create one if you did not pass --admin-username and --admin-password:"
+        echo "  marzban cli admin create"
+        echo "The command asks for a username, \"Is sudo [y/N]\" (answer y for the main administrator), a password with confirmation, and optional Telegram ID and Discord webhook."
+    fi
+
+    colorized_echo cyan "Logs are not followed. Read them later with: marzban logs"
+    colorized_echo blue "====================================="
+    echo
+}
+
 status_command() {
     
     # Check if marzban is installed
@@ -1426,6 +1463,7 @@ issue_ssl_certificate() {
 
 wait_for_marzban_ready() {
     local port=$1
+    local scheme=${2:-https}
     local attempts=60
     local i=0
     local http_code
@@ -1433,7 +1471,7 @@ wait_for_marzban_ready() {
     colorized_echo blue "Waiting for Marzban to become ready on port ${port}..."
     while [ $i -lt $attempts ]; do
         if is_marzban_up; then
-            http_code=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${port}/" 2>/dev/null || echo "000")
+            http_code=$(curl -k -s -o /dev/null -w "%{http_code}" "${scheme}://127.0.0.1:${port}/" 2>/dev/null || echo "000")
             if [[ "$http_code" =~ ^[23] ]]; then
                 colorized_echo green "Marzban is ready (HTTP ${http_code})."
                 return 0
@@ -1501,6 +1539,7 @@ print_post_install_checklist() {
     colorized_echo blue "====================================="
     colorized_echo green "Panel URL: https://${domain}:${port}/dashboard/"
     colorized_echo green "Panel admin: ${PARTNER_ADMIN_USERNAME}"
+    colorized_echo cyan "Sign in with this username and the plain admin password from the bot. This installer only received a hash and does not print it."
     colorized_echo cyan "MySQL password is stored in ${ENV_FILE}"
     echo
     colorized_echo yellow "Next steps in the bot admin panel:"
@@ -1887,11 +1926,6 @@ install_partner_command() {
     verify_partner_install "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
     print_post_install_checklist "$PARTNER_DOMAIN" "$PARTNER_UVICORN_PORT"
     run_partner_runner_install
-
-    if [ "$PARTNER_NO_LOGS" = "false" ]; then
-        colorized_echo yellow "Press Ctrl+C to stop following logs."
-        follow_marzban_logs
-    fi
 }
 
 require_ssl_install_params() {
@@ -1932,6 +1966,8 @@ install_command() {
     database_type="sqlite"
     marzban_version="latest"
     marzban_version_set="false"
+    INSTALL_ADMIN_USERNAME=""
+    INSTALL_ADMIN_PASSWORD=""
 
     # Parse options
     while [[ $# -gt 0 ]]; do
@@ -1987,12 +2023,39 @@ install_command() {
                 PARTNER_NO_LOGS="true"
                 shift
             ;;
+            --admin-username)
+                INSTALL_ADMIN_USERNAME="$2"
+                shift 2
+            ;;
+            --admin-password)
+                INSTALL_ADMIN_PASSWORD="$2"
+                shift 2
+            ;;
             *)
                 colorized_echo red "Unknown option: $1"
                 exit 1
             ;;
         esac
     done
+
+    if [ -n "$INSTALL_ADMIN_USERNAME" ] || [ -n "$INSTALL_ADMIN_PASSWORD" ]; then
+        if [ -z "$INSTALL_ADMIN_USERNAME" ]; then
+            colorized_echo red "--admin-password requires --admin-username."
+            exit 1
+        fi
+        if [ -z "$INSTALL_ADMIN_PASSWORD" ]; then
+            if [ "$PARTNER_NON_INTERACTIVE" = "true" ]; then
+                colorized_echo red "Missing --admin-password for non-interactive install."
+                exit 1
+            fi
+            read -s -p "Panel admin password: " INSTALL_ADMIN_PASSWORD
+            echo
+        fi
+        if [ -z "$INSTALL_ADMIN_PASSWORD" ]; then
+            colorized_echo red "Admin password cannot be empty."
+            exit 1
+        fi
+    fi
 
     if [[ "$database_type" != "mysql" && "$database_type" != "mariadb" ]]; then
         if [ -n "$SSL_DOMAIN" ] || [ -n "$SSL_CERT_EMAIL" ]; then
@@ -2078,13 +2141,16 @@ install_command() {
     fi
     up_marzban
 
-    if [ -n "$SSL_DOMAIN" ]; then
-        colorized_echo green "Panel URL: https://${SSL_DOMAIN}:${SSL_UVICORN_PORT}/dashboard/"
-        colorized_echo cyan "Create an admin: marzban cli admin create"
-    fi
-
-    if [ "$PARTNER_NO_LOGS" = "false" ]; then
-        follow_marzban_logs
+    if [ -n "$INSTALL_ADMIN_USERNAME" ]; then
+        if [ -n "$SSL_DOMAIN" ]; then
+            wait_for_marzban_ready "$SSL_UVICORN_PORT"
+        else
+            wait_for_marzban_ready 8000 http
+        fi
+        create_panel_admin "$INSTALL_ADMIN_USERNAME" "$INSTALL_ADMIN_PASSWORD"
+        print_install_access true "$INSTALL_ADMIN_USERNAME" "$INSTALL_ADMIN_PASSWORD"
+    else
+        print_install_access false
     fi
 }
 
@@ -2543,6 +2609,7 @@ usage() {
     echo
 }
 
+if [ "${MARZBAN_SCRIPT_SOURCE_ONLY:-}" != "1" ]; then
 case "$1" in
     up)
         shift; up_command "$@";;
@@ -2579,3 +2646,4 @@ case "$1" in
     help|*)
         usage;;
 esac
+fi

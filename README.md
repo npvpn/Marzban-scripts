@@ -2,53 +2,33 @@
 Скрипты для Marzban
 
 ## Установка Marzban
-- **Установить Marzban с SQLite** (без SSL, порт 8000):
+
+На этот сервер нужна A-запись домена. Для MySQL и MariaDB установщик проверяет, что домен указывает на IP сервера, и выпускает сертификат Let's Encrypt. Нужны свободный порт 80 и Debian или Ubuntu.
 
 ```bash
-sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install
+sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mysql \
+  --domain panel.example.com \
+  --cert-email admin@example.com \
+  --admin-username admin \
+  --admin-password 'change-me' \
+  --non-interactive
 ```
 
-- **Установить Marzban с MySQL** (Let's Encrypt, HTTPS :8001). Интерактивно скрипт спросит домен и email:
+- `--database` — `mysql`, `mariadb` или `sqlite`. Проверка домена и сертификат выполняются для `mysql` и `mariadb`. `sqlite` слушает HTTP на порту 8000; `--domain` и `--cert-email` с ним завершают установку с ошибкой.
+- `--domain` — домен панели.
+- `--cert-email` — почта для Let's Encrypt.
+- `--admin-username` и `--admin-password` — создать главного администратора (sudo) во время установки. Если их не передавать, после установки выполните `marzban cli admin create`.
+- `--non-interactive` — не спрашивать домен, почту и пароль администратора. Без флага скрипт спросит домен и почту сам, а пароль администратора — только если указан `--admin-username` без пароля.
+- `--uvicorn-port` — порт HTTPS, по умолчанию 8001.
+- `--skip-dns-check` — не проверять A-запись.
+- `--skip-cert` — не выпускать сертификат; файлы уже лежат в `/etc/letsencrypt/live/<домен>/`.
+- `--version v0.5.2` или `--dev` — образ панели вместо `latest`. Вместе их указывать нельзя.
 
-  ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mysql
-  ```
+После установки логи контейнеров не показываются. Скрипт печатает адрес входа. Если администратор создан флагами выше, там же будут логин и пароль. Если флаги не передавали, скрипт напишет команду `marzban cli admin create`: она спросит логин, «Is sudo [y/N]» (для главного администратора ответьте `y`), пароль с подтверждением, а также необязательные Telegram ID и Discord webhook. Логи позже: `marzban logs`. Флаг `--no-logs` по-прежнему принимается и на установке ничего не меняет.
 
-  С параметрами:
+Для MySQL и MariaDB адрес входа: `https://<домен>:8001/dashboard/#/login`. Для SQLite: `http://<IP сервера>:8000/dashboard/#/login`.
 
-  ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mysql \
-    --domain panel.example.com \
-    --cert-email admin@example.com \
-    --non-interactive
-  ```
-
-- **Установить Marzban с MariaDB**:
-
-  ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb \
-    --domain panel.example.com \
-    --cert-email admin@example.com
-  ```
-  
-- **Установить Marzban с MariaDB и dev-веткой**:
-
-  ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --dev \
-    --domain panel.example.com \
-    --cert-email admin@example.com
-  ```
-
-- **Установить Marzban с MariaDB и конкретной версией**:
-
-  ```bash
-  sudo bash -c "$(curl -sL https://github.com/npvpn/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb --version v0.5.2 \
-    --domain panel.example.com \
-    --cert-email admin@example.com
-  ```
-
-Флаги SSL (только mysql/mariadb): `--domain`, `--cert-email`, `--uvicorn-port 8001`, `--skip-dns-check`, `--skip-cert`, `--non-interactive`, `--no-logs`.  
-Нужны A-запись домена на сервер, свободный порт 80, Debian/Ubuntu. Админа после установки: `marzban cli admin create`. Панель: `https://<домен>:8001/dashboard/`.
+С `--non-interactive` название подписки, ссылка бота и ссылка поддержки остаются значениями по умолчанию. Их можно поменять в `/opt/marzban/.env` (`SUB_PROFILE_TITLE`, `BOT_URL`, `SUB_SUPPORT_URL`) и применить командой `marzban restart`.
 
 Сертификат: в compose монтируется `/etc/letsencrypt` целиком (чтобы после `certbot renew` контейнер видел новые файлы, а не старый inode). Uvicorn читает cert только при старте — скрипт ставит deploy-hook `/etc/letsencrypt/renewal-hooks/deploy/restart-marzban.sh`. На уже установленной панели то же делает `marzban update`.
 
